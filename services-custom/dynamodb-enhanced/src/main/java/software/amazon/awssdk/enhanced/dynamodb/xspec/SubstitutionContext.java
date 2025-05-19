@@ -14,12 +14,8 @@
  */
 package software.amazon.awssdk.enhanced.dynamodb.xspec;
 
-import java.util.Collections;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
  * An internal class to represent the substitution context for name maps and value maps.
@@ -38,20 +34,11 @@ final class SubstitutionContext {
     private final Map<Object, Integer> valueToToken =
         new LinkedHashMap<>();
 
-    private final Set<String> accessedNameTokens = new LinkedHashSet<>();
-    private final Set<String> accessedValueTokens = new LinkedHashSet<>();
-
-    public void beginTrackingAccess() {
-        accessedNameTokens.clear();
-        accessedValueTokens.clear();
-    }
-
     /**
      * Returns the name token for the given name, creating a new token as necessary.
      */
     String nameTokenFor(String name) {
         Integer token = nameToToken.computeIfAbsent(name, k -> nameToToken.size());
-        accessedNameTokens.add("#" + token);
         return "#" + token;
     }
 
@@ -60,7 +47,6 @@ final class SubstitutionContext {
      */
     String valueTokenFor(Object value) {
         Integer token = valueToToken.computeIfAbsent(value, k -> valueToToken.size());
-        accessedValueTokens.add(":" + token);
         return ":" + token;
     }
 
@@ -80,23 +66,6 @@ final class SubstitutionContext {
         Map<String, Object> out = new LinkedHashMap<>();
         valueToToken.forEach((key, value) -> out.put(":" + value, key));
         return out;
-    }
-
-    // For testing
-    public Set<String> endTrackingAccess() {
-        return Collections.unmodifiableSet(new LinkedHashSet<>(accessedNameTokens));
-    }
-
-    public Map<String, String> getAccessedNames() {
-        return getNameMap().entrySet().stream()
-                           .filter(e -> accessedNameTokens.contains(e.getKey()))
-                           .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-    }
-
-    public Map<String, Object> getAccessedValues() {
-        return getValueMap().entrySet().stream()
-                            .filter(e -> accessedValueTokens.contains(e.getKey()))
-                            .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
     }
 
     // For testing

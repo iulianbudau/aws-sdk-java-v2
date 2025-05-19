@@ -12,13 +12,11 @@
  * express or implied. See the License for the specific language governing
  * permissions and limitations under the License.
  */
+
 package software.amazon.awssdk.enhanced.dynamodb.xspec;
 
 import java.util.Collections;
-import java.util.List;
 import java.util.Map;
-import software.amazon.awssdk.enhanced.dynamodb.Expression;
-import software.amazon.awssdk.enhanced.dynamodb.NestedAttributeName;
 import software.amazon.awssdk.enhanced.dynamodb.internal.converter.AttributeValueMapConverter;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
@@ -30,10 +28,8 @@ import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
  * this object is thread-safe as long as the underlying values provided by the users are thread-safe.
  */
 public final class ScanExpressionSpec {
-    private final Expression filterExpression;
-    private final Expression projectionExpression;
-    private final List<String> attributesToProject;
-    private final List<NestedAttributeName> nestedAttributesToProject;
+    private final String projectionExpression;
+    private final String filterExpression;
     private final Map<String, String> expressionNames;
     private final Map<String, AttributeValue> expressionValues;
 
@@ -41,43 +37,35 @@ public final class ScanExpressionSpec {
         SubstitutionContext context = new SubstitutionContext();
         this.filterExpression = builder.buildConditionExpression(context);
         this.projectionExpression = builder.buildProjectionExpression(context);
-        this.attributesToProject = builder.buildAttributesToProject();
-        this.nestedAttributesToProject = builder.buildNestedAttributesToProject();
-        this.expressionNames = context.getNameMap() == null ? null : Collections.unmodifiableMap(context.getNameMap());
-        this.expressionValues = context.getValueMap() == null ? null : new AttributeValueMapConverter().convert(context.getValueMap());
-    }
 
-    /**
-     * Returns the condition expression; or null if there is none.
-     */
-    public Expression getFilterExpression() {
-        return filterExpression;
+        this.expressionNames = context.getNameMap() == null ? null : Collections.unmodifiableMap(context.getNameMap());
+        this.expressionValues = context.getValueMap() == null ? null :
+                                new AttributeValueMapConverter().convert(context.getValueMap());
     }
 
     /**
      * Returns the projection expression; or null if there is none.
      */
-    public Expression getProjectionExpression() {
+    public String getProjectionExpression() {
         return projectionExpression;
     }
 
-    public List<String> getAttributesToProject() {
-        return Collections.unmodifiableList(attributesToProject);
-    }
-
-    public List<NestedAttributeName> getNestedAttributesToProject() {
-        return Collections.unmodifiableList(nestedAttributesToProject);
+    /**
+     * Returns the condition expression; or null if there is none.
+     */
+    public String getFilterExpression() {
+        return filterExpression;
     }
 
     /**
-     * Returns the expression names map which is unmodifiable; or null if there is none.
+     * Returns the name map which is unmodifiable; or null if there is none.
      */
     public Map<String, String> getExpressionNames() {
         return Collections.unmodifiableMap(expressionNames);
     }
 
     /**
-     * Returns the expression values map which is unmodifiable; or null if there is none.
+     * Returns the value map which is unmodifiable; or null if there is none.
      */
     public Map<String, AttributeValue> getExpressionValues() {
         return Collections.unmodifiableMap(expressionValues);

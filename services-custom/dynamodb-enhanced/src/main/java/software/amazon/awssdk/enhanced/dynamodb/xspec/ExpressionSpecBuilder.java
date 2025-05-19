@@ -457,6 +457,13 @@ public final class ExpressionSpecBuilder implements Cloneable {
     }
 
     /**
+     * Returns an expression specification for use in a {@code DeleteItemEnhanced} request to DynamoDB.
+     */
+    public DeleteItemEnhancedExpressionSpec buildForDeleteItemEnhanced() {
+        return new DeleteItemEnhancedExpressionSpec(this);
+    }
+
+    /**
      * Returns an expression specification for use in a {@code GetItem} request to DynamoDB.
      */
     public GetItemExpressionSpec buildForGetItem() {
@@ -471,10 +478,24 @@ public final class ExpressionSpecBuilder implements Cloneable {
     }
 
     /**
+     * Returns an expression specification for use in a query enhanced request to DynamoDB.
+     */
+    public QueryEnhancedExpressionSpec buildForQueryEnhanced() {
+        return new QueryEnhancedExpressionSpec(this);
+    }
+
+    /**
      * Returns an expression specification for use in a scan request to DynamoDB.
      */
     public ScanExpressionSpec buildForScan() {
         return new ScanExpressionSpec(this);
+    }
+
+    /**
+     * Returns an expression specification for use in a scan enhanced request to DynamoDB.
+     */
+    public ScanEnhancedExpressionSpec buildForScanEnhanced() {
+        return new ScanEnhancedExpressionSpec(this);
     }
 
     /**
@@ -485,6 +506,13 @@ public final class ExpressionSpecBuilder implements Cloneable {
     }
 
     /**
+     * Returns an expression specification for use in an {@code UpdateItemEnhanced} request to DynamoDB.
+     */
+    public UpdateItemEnhancedExpressionSpec buildForUpdateEnhanced() {
+        return new UpdateItemEnhancedExpressionSpec(this);
+    }
+
+    /**
      * Returns an expression specification for use in a {@code PutItem} request to DynamoDB.
      */
     public PutItemExpressionSpec buildForPut() {
@@ -492,16 +520,23 @@ public final class ExpressionSpecBuilder implements Cloneable {
     }
 
     /**
+     * Returns an expression specification for use in a {@code PutItemEnhanced} request to DynamoDB.
+     */
+    public PutItemEnhancedExpressionSpec buildForPutEnhanced() {
+        return new PutItemEnhancedExpressionSpec(this);
+    }
+
+    /**
      * Builds and returns the update expression to be used in a dynamodb request; or null if there is none.
      */
-    Expression buildUpdateExpression(SubstitutionContext context) {
+    String buildUpdateExpression(SubstitutionContext context) {
         StringBuilder sb = new StringBuilder();
-        context.beginTrackingAccess();
-        updates.forEach((operator, value) -> {
+        for (Map.Entry<String, List<UpdateAction>> e : updates.entrySet()) {
             boolean firstOfUpdateType = true;
-            for (UpdateAction expr : value) {
+            for (UpdateAction expr : e.getValue()) {
                 if (firstOfUpdateType) {
                     firstOfUpdateType = false;
+                    final String operator = e.getKey();
                     if (sb.length() > 0) {
                         sb.append(" ");
                     }
@@ -511,32 +546,18 @@ public final class ExpressionSpecBuilder implements Cloneable {
                 }
                 sb.append(expr.asSubstituted(context));
             }
-        });
-
-        return Expression.builder()
-            .expression(sb.toString())
-            .expressionNames(context.getAccessedNames() == null ? null : Collections.unmodifiableMap(context.getAccessedNames()))
-            .expressionValues(context.getAccessedValues() == null ? null :
-                           new AttributeValueMapConverter().convert(context.getAccessedValues()))
-            .build();
+        }
+        return sb.toString();
     }
 
     /**
-     * Builds and returns the projection expression to be used in a dynamodb GetItem request; or null if there is none.
+     * Builds and returns the String projection expression to be used in a dynamodb GetItem request; or null if there is none.
      */
-
-    Expression buildProjectionExpression(SubstitutionContext context) {
+    String buildProjectionExpression(SubstitutionContext context) {
         if (projections.isEmpty()) {
             return null;
         }
-        context.beginTrackingAccess();
-        String projectionExpression = projections.stream()
-                                                 .map(projection -> projection.asSubstituted(context))
-                                                 .collect(Collectors.joining(", "));
-        return Expression.builder()
-                         .expression(projectionExpression)
-                         .expressionNames(context.getAccessedNames() == null ? null : Collections.unmodifiableMap(context.getAccessedNames()))
-                         .build();
+        return projections.stream().map(projection -> projection.asSubstituted(context)).collect(Collectors.joining(", "));
     }
 
     List<String> buildAttributesToProject() {
@@ -546,7 +567,7 @@ public final class ExpressionSpecBuilder implements Cloneable {
 
         return projections.stream()
                           .map(PathOperand::getPath)
-                          .filter(path -> !path.contains(".")) // top-level only
+                          .filter(path -> !path.contains("."))
                           .distinct()
                           .collect(Collectors.toList());
     }
@@ -558,49 +579,44 @@ public final class ExpressionSpecBuilder implements Cloneable {
         }
 
         return projections.stream()
-                          .map(PathOperand::getPath)     // extract the string path: e.g., "level0.level1.level2"
+                          .map(PathOperand::getPath)
                           .filter(path -> path.contains("."))
                           .distinct()
-                          .map(path -> Arrays.asList(path.split("\\.")))    // split by dots
-                          .map(NestedAttributeName::create)  // build NestedAttributeName
+                          .map(path -> Arrays.asList(path.split("\\.")))
+                          .map(NestedAttributeName::create)
                           .collect(Collectors.toList());
     }
 
     /**
-     * Builds and returns the condition expression to be used in a dynamodb request; or null if there is none.
+     * Builds and returns the String condition expression to be used in a dynamodb request; or null if there is none.
      */
+    String buildConditionExpression(SubstitutionContext context) {
+        return condition == null ? null : condition.asSubstituted(context);
+    }
 
-    Expression buildConditionExpression(SubstitutionContext context) {
+    /**
+     * Builds and returns the Expression condition expression to be used in a dynamodb enhanced request; or null if there is none.
+     */
+    Expression buildConditionExpression() {
         if(condition == null) {
             return null;
         }
 
-        context.beginTrackingAccess();
+        SubstitutionContext context = new SubstitutionContext();
         String conditionExpression = condition.asSubstituted(context);
         return Expression.builder()
                          .expression(conditionExpression)
-                         .expressionNames(context.getAccessedNames() == null ? null : Collections.unmodifiableMap(context.getAccessedNames()))
-                         .expressionValues(context.getAccessedValues() == null ? null :
-                                           new AttributeValueMapConverter().convert(context.getAccessedValues()))
+                         .expressionNames(context.getNameMap() == null ? null : Collections.unmodifiableMap(context.getNameMap()))
+                         .expressionValues(context.getValueMap() == null ? null :
+                                           new AttributeValueMapConverter().convert(context.getValueMap()))
                          .build();
     }
 
     /**
-     * Builds and returns the key condition expression to be used in a dynamodb query request; or null if there is none.
+     * Builds and returns the String key condition expression to be used in a dynamodb query request; or null if there is none.
      */
-
-    Expression buildKeyConditionExpression(SubstitutionContext context) {
-        if(keyCondition == null) {
-            return null;
-        }
-        context.beginTrackingAccess();
-        String keyConditionExpression = keyCondition.asSubstituted(context);
-        return Expression.builder()
-                         .expression(keyConditionExpression)
-                         .expressionNames(context.getAccessedNames() == null ? null : Collections.unmodifiableMap(context.getAccessedNames()))
-                         .expressionValues(context.getAccessedValues() == null ? null :
-                                           new AttributeValueMapConverter().convert(context.getAccessedValues()))
-                         .build();
+    String buildKeyConditionExpression(SubstitutionContext context) {
+        return keyCondition == null ? null : keyCondition.asSubstituted(context);
     }
 
     @Override

@@ -12,20 +12,19 @@
  * express or implied. See the License for the specific language governing
  * permissions and limitations under the License.
  */
+
 package software.amazon.awssdk.enhanced.dynamodb.xspec;
 
 import java.util.Collections;
 import java.util.Map;
 import software.amazon.awssdk.annotations.Immutable;
-import software.amazon.awssdk.enhanced.dynamodb.Expression;
-
 
 /**
  * Expression specification for making GetItem request to Amazon DynamoDB.
  */
 @Immutable
 public final class GetItemExpressionSpec {
-    private final Expression projectionExpression;
+    private final String projectionExpression;
     private final Map<String, String> expressionNames;
 
     GetItemExpressionSpec(ExpressionSpecBuilder builder) {
@@ -37,14 +36,15 @@ public final class GetItemExpressionSpec {
     /**
      * Returns the projection expression; or null if there is none.
      */
-    public Expression getProjectionExpression() {
+    public String getProjectionExpression() {
         return projectionExpression;
     }
 
     /**
-     * Returns the expression names map which is unmodifiable; or null if there is none.
+     * Returns the name map which is unmodifiable; or null if there is none.
      */
     public Map<String, String> getExpressionNames() {
         return Collections.unmodifiableMap(expressionNames);
     }
 }
+

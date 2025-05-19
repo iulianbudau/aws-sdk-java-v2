@@ -12,13 +12,11 @@
  * express or implied. See the License for the specific language governing
  * permissions and limitations under the License.
  */
+
 package software.amazon.awssdk.enhanced.dynamodb.xspec;
 
 import java.util.Collections;
-import java.util.List;
 import java.util.Map;
-import software.amazon.awssdk.enhanced.dynamodb.Expression;
-import software.amazon.awssdk.enhanced.dynamodb.NestedAttributeName;
 import software.amazon.awssdk.enhanced.dynamodb.internal.converter.AttributeValueMapConverter;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
@@ -31,11 +29,9 @@ import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
  */
 public final class QueryExpressionSpec {
 
-    private final Expression keyConditionExpression;
-    private final Expression filterExpression;
-    private final Expression projectionExpression;
-    private final List<String> attributesToProject;
-    private final List<NestedAttributeName> nestedAttributesToProject;
+    private final String keyConditionExpression;
+    private final String filterExpression;
+    private final String projectionExpression;
     private final Map<String, String> expressionNames;
     private final Map<String, AttributeValue> expressionValues;
 
@@ -44,37 +40,43 @@ public final class QueryExpressionSpec {
         this.keyConditionExpression = builder.buildKeyConditionExpression(context);
         this.filterExpression = builder.buildConditionExpression(context);
         this.projectionExpression = builder.buildProjectionExpression(context);
-        this.attributesToProject = builder.buildAttributesToProject();
-        this.nestedAttributesToProject = builder.buildNestedAttributesToProject();
+
         this.expressionNames = context.getNameMap() == null ? null : Collections.unmodifiableMap(context.getNameMap());
         this.expressionValues = context.getValueMap() == null ? null :
                                 new AttributeValueMapConverter().convert(context.getValueMap());
     }
 
-    public Expression getKeyConditionExpression() {
+    /**
+     * Returns the key condition expression; or null if there is none.
+     */
+    public String getKeyConditionExpression() {
         return keyConditionExpression;
     }
 
-    public Expression getFilterExpression() {
+    /**
+     * Returns the condition expression; or null if there is none.
+     */
+    public String getFilterExpression() {
         return filterExpression;
     }
 
-    public Expression getProjectionExpression() {
+    /**
+     * Returns the projection expression; or null if there is none.
+     */
+    public String getProjectionExpression() {
         return projectionExpression;
     }
 
-    public List<String> getAttributesToProject() {
-        return Collections.unmodifiableList(attributesToProject);
-    }
-
-    public List<NestedAttributeName> getNestedAttributesToProject() {
-        return Collections.unmodifiableList(nestedAttributesToProject);
-    }
-
+    /**
+     * Returns the name map which is unmodifiable; or null if there is none.
+     */
     public Map<String, String> getExpressionNames() {
         return Collections.unmodifiableMap(expressionNames);
     }
 
+    /**
+     * Returns the value map which is unmodifiable; or null if there is none.
+     */
     public Map<String, AttributeValue> getExpressionValues() {
         return Collections.unmodifiableMap(expressionValues);
     }

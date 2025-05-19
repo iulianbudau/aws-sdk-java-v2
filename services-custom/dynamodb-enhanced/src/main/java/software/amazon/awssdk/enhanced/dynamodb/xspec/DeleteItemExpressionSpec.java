@@ -12,11 +12,11 @@
  * express or implied. See the License for the specific language governing
  * permissions and limitations under the License.
  */
+
 package software.amazon.awssdk.enhanced.dynamodb.xspec;
 
 import java.util.Collections;
 import java.util.Map;
-import software.amazon.awssdk.enhanced.dynamodb.Expression;
 import software.amazon.awssdk.enhanced.dynamodb.internal.converter.AttributeValueMapConverter;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
@@ -28,7 +28,7 @@ import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
  * this object is thread-safe as long as the underlying values provided by the users are thread-safe.
  */
 public final class DeleteItemExpressionSpec {
-    private final Expression conditionExpression;
+    private final String conditionExpression;
     private final Map<String, String> expressionNames;
     private final Map<String, AttributeValue> expressionValues;
 
@@ -43,19 +43,19 @@ public final class DeleteItemExpressionSpec {
     /**
      * Returns the condition expression; or null if there is none.
      */
-    public Expression getConditionExpression() {
+    public String getConditionExpression() {
         return conditionExpression;
     }
 
     /**
-     * Returns the expression names map which is unmodifiable; or null if there is none.
+     * Returns the name map which is unmodifiable; or null if there is none.
      */
     public Map<String, String> getExpressionNames() {
         return Collections.unmodifiableMap(expressionNames);
     }
 
     /**
-     * Returns the expression values map which is unmodifiable; or null if there is none.
+     * Returns the value map which is unmodifiable; or null if there is none.
      */
     public Map<String, AttributeValue> getExpressionValues() {
         return Collections.unmodifiableMap(expressionValues);
