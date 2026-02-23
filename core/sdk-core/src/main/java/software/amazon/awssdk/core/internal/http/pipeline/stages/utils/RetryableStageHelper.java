@@ -116,8 +116,28 @@ public final class RetryableStageHelper {
      * Notify the retry strategy that the request attempt succeeded.
      */
     public void recordAttemptSucceeded() {
+        recordAttemptSucceededWithHedgeCount(null);
+    }
+
+    /**
+     * Notify the retry strategy that the request attempt succeeded, with an optional hedged attempt count
+     * (for use when hedging: release N units so net consumption is zero).
+     *
+     * @param hedgedAttemptsStarted when non-null, the number of hedged attempts started for this logical request
+     */
+    public void recordAttemptSucceededWithHedgeCount(Integer hedgedAttemptsStarted) {
         RetryToken retryToken = context.executionAttributes().getAttribute(RETRY_TOKEN);
-        RecordSuccessRequest recordSuccessRequest = RecordSuccessRequest.create(retryToken);
+        recordSuccessWithTokenAndHedgeCount(retryToken, hedgedAttemptsStarted);
+    }
+
+    /**
+     * Notify the retry strategy that the request attempt succeeded with the given token and hedged count.
+     * Used when the winning attempt's context is not this helper's context (e.g. hedging).
+     */
+    public void recordSuccessWithTokenAndHedgeCount(RetryToken token, Integer hedgedAttemptsStarted) {
+        RecordSuccessRequest recordSuccessRequest = hedgedAttemptsStarted != null
+                ? RecordSuccessRequest.create(token, hedgedAttemptsStarted)
+                : RecordSuccessRequest.create(token);
         retryStrategy().recordSuccess(recordSuccessRequest);
         context.executionContext().metricCollector().reportMetric(RETRY_COUNT, retriesAttemptedSoFar());
     }

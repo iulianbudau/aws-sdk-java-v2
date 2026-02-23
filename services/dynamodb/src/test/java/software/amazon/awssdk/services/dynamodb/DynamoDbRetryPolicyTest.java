@@ -2,6 +2,7 @@ package software.amazon.awssdk.services.dynamodb;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.Duration;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -124,6 +125,18 @@ class DynamoDbRetryPolicyTest {
         RetryMode retryMode = SdkDefaultRetryStrategy.retryMode(retryStrategy);
 
         assertThat(retryMode).isEqualTo(RetryMode.LEGACY);
+    }
+
+    @Test
+    void defaultHedgingConfig_isEnabledWithExpectedDefaults() {
+        software.amazon.awssdk.core.client.config.HedgingConfig config =
+            DynamoDbRetryPolicy.defaultHedgingConfig();
+        assertThat(config.enabled()).isTrue();
+        assertThat(config.defaultDelay()).isEqualTo(Duration.ofMillis(7));
+        assertThat(config.maxHedgedAttempts()).isEqualTo(3);
+        assertThat(config.hedgeableOperations()).contains("GetItem", "BatchGetItem", "Query", "Scan");
+        assertThat(config.shouldHedge("GetItem")).isTrue();
+        assertThat(config.shouldHedge("PutItem")).isFalse();
     }
 
 }

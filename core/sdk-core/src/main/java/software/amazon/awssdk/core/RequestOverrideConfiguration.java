@@ -29,6 +29,7 @@ import software.amazon.awssdk.annotations.Immutable;
 import software.amazon.awssdk.annotations.SdkPreviewApi;
 import software.amazon.awssdk.annotations.SdkPublicApi;
 import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
+import software.amazon.awssdk.core.client.config.HedgingConfig;
 import software.amazon.awssdk.core.interceptor.ExecutionAttribute;
 import software.amazon.awssdk.core.interceptor.ExecutionAttributes;
 import software.amazon.awssdk.core.signer.Signer;
@@ -55,6 +56,7 @@ public abstract class RequestOverrideConfiguration {
     private final EndpointProvider endpointProvider;
     private final CompressionConfiguration compressionConfiguration;
     private final List<SdkPlugin> plugins;
+    private final HedgingConfig hedgingConfig;
 
     protected RequestOverrideConfiguration(Builder<?> builder) {
         this.headers = CollectionUtils.deepUnmodifiableMap(builder.headers(), () -> new TreeMap<>(String.CASE_INSENSITIVE_ORDER));
@@ -68,6 +70,7 @@ public abstract class RequestOverrideConfiguration {
         this.endpointProvider = builder.endpointProvider();
         this.compressionConfiguration = builder.compressionConfiguration();
         this.plugins = Collections.unmodifiableList(new ArrayList<>(builder.plugins()));
+        this.hedgingConfig = builder.hedgingConfig().orElse(null);
     }
 
     /**
@@ -160,6 +163,16 @@ public abstract class RequestOverrideConfiguration {
     }
 
     /**
+     * Optional hedging configuration for this request. When present, overrides client-level hedging config.
+     *
+     * @see HedgingConfig
+     * @see ClientOverrideConfiguration#hedgingConfig()
+     */
+    public Optional<HedgingConfig> hedgingConfig() {
+        return Optional.ofNullable(hedgingConfig);
+    }
+
+    /**
      * Returns the additional execution attributes to be added to this request.
      * This collection of attributes is added in addition to the attributes set on the client.
      * An attribute value added on the client within the collection of attributes is superseded by an
@@ -205,7 +218,8 @@ public abstract class RequestOverrideConfiguration {
                Objects.equals(executionAttributes, that.executionAttributes) &&
                Objects.equals(endpointProvider, that.endpointProvider) &&
                Objects.equals(compressionConfiguration, that.compressionConfiguration) &&
-               Objects.equals(plugins, that.plugins);
+               Objects.equals(plugins, that.plugins) &&
+               Objects.equals(hedgingConfig, that.hedgingConfig);
     }
 
     @Override
@@ -222,6 +236,7 @@ public abstract class RequestOverrideConfiguration {
         hashCode = 31 * hashCode + Objects.hashCode(endpointProvider);
         hashCode = 31 * hashCode + Objects.hashCode(compressionConfiguration);
         hashCode = 31 * hashCode + Objects.hashCode(plugins);
+        hashCode = 31 * hashCode + Objects.hashCode(hedgingConfig);
         return hashCode;
     }
 
@@ -529,6 +544,18 @@ public abstract class RequestOverrideConfiguration {
         List<SdkPlugin> plugins();
 
         /**
+         * Set the optional hedging configuration for this request.
+         *
+         * @see HedgingConfig
+         */
+        B hedgingConfig(HedgingConfig hedgingConfig);
+
+        /**
+         * The optional hedging configuration for this request.
+         */
+        Optional<HedgingConfig> hedgingConfig();
+
+        /**
          * Create a new {@code SdkRequestOverrideConfiguration} with the properties set on this builder.
          *
          * @return The new {@code SdkRequestOverrideConfiguration}.
@@ -548,7 +575,7 @@ public abstract class RequestOverrideConfiguration {
         private EndpointProvider endpointProvider;
         private CompressionConfiguration compressionConfiguration;
         private List<SdkPlugin> plugins = new ArrayList<>();
-
+        private HedgingConfig hedgingConfig;
 
         protected BuilderImpl() {
         }
@@ -565,6 +592,7 @@ public abstract class RequestOverrideConfiguration {
             endpointProvider(sdkRequestOverrideConfig.endpointProvider);
             compressionConfiguration(sdkRequestOverrideConfig.compressionConfiguration);
             plugins(sdkRequestOverrideConfig.plugins);
+            hedgingConfig(sdkRequestOverrideConfig.hedgingConfig().orElse(null));
         }
 
         @Override
@@ -768,6 +796,18 @@ public abstract class RequestOverrideConfiguration {
         @Override
         public List<SdkPlugin> plugins() {
             return Collections.unmodifiableList(plugins);
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public B hedgingConfig(HedgingConfig hedgingConfig) {
+            this.hedgingConfig = hedgingConfig;
+            return (B) this;
+        }
+
+        @Override
+        public Optional<HedgingConfig> hedgingConfig() {
+            return Optional.ofNullable(hedgingConfig);
         }
     }
 }

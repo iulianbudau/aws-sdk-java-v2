@@ -97,6 +97,11 @@ public final class SdkClientOption<T> extends ClientOption<T> {
         new SdkClientOption<>(new UnsafeValueType(RetryStrategy.Builder.class));
 
     /**
+     * @see ClientOverrideConfiguration#hedgingConfig()
+     */
+    public static final SdkClientOption<HedgingConfig> HEDGING_CONFIG = new SdkClientOption<>(HedgingConfig.class);
+
+    /**
      * @see ClientOverrideConfiguration#executionInterceptors()
      */
     public static final SdkClientOption<List<ExecutionInterceptor>> EXECUTION_INTERCEPTORS =

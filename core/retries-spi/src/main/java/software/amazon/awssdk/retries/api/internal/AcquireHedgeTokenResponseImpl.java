@@ -15,23 +15,23 @@
 
 package software.amazon.awssdk.retries.api.internal;
 
-import java.util.Optional;
+import java.time.Duration;
 import software.amazon.awssdk.annotations.SdkInternalApi;
-import software.amazon.awssdk.retries.api.RecordSuccessRequest;
+import software.amazon.awssdk.retries.api.AcquireHedgeTokenResponse;
 import software.amazon.awssdk.retries.api.RetryToken;
 import software.amazon.awssdk.utils.Validate;
 
 /**
- * Implementation of the {@link RecordSuccessRequest} interface.
+ * Implementation of {@link AcquireHedgeTokenResponse}.
  */
 @SdkInternalApi
-public final class RecordSuccessRequestImpl implements RecordSuccessRequest {
+public final class AcquireHedgeTokenResponseImpl implements AcquireHedgeTokenResponse {
     private final RetryToken token;
-    private final Integer hedgedAttemptsStarted;
+    private final Duration delayUntilThisAttempt;
 
-    private RecordSuccessRequestImpl(RetryToken token, Integer hedgedAttemptsStarted) {
+    private AcquireHedgeTokenResponseImpl(RetryToken token, Duration delayUntilThisAttempt) {
         this.token = Validate.paramNotNull(token, "token");
-        this.hedgedAttemptsStarted = hedgedAttemptsStarted;
+        this.delayUntilThisAttempt = Validate.paramNotNull(delayUntilThisAttempt, "delayUntilThisAttempt");
     }
 
     @Override
@@ -40,15 +40,11 @@ public final class RecordSuccessRequestImpl implements RecordSuccessRequest {
     }
 
     @Override
-    public Optional<Integer> hedgedAttemptsStarted() {
-        return Optional.ofNullable(hedgedAttemptsStarted);
+    public Duration delayUntilThisAttempt() {
+        return delayUntilThisAttempt;
     }
 
-    public static RecordSuccessRequest create(RetryToken token) {
-        return new RecordSuccessRequestImpl(token, null);
-    }
-
-    public static RecordSuccessRequest create(RetryToken token, int hedgedAttemptsStarted) {
-        return new RecordSuccessRequestImpl(token, hedgedAttemptsStarted);
+    public static AcquireHedgeTokenResponse create(RetryToken token, Duration delayUntilThisAttempt) {
+        return new AcquireHedgeTokenResponseImpl(token, delayUntilThisAttempt);
     }
 }

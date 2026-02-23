@@ -147,6 +147,12 @@ public class CustomizationConfig {
      */
     private String customRetryStrategy;
 
+    /**
+     * Optional class that provides default hedging config via static defaultHedgingConfig().
+     * When set, the client builder will set HEDGING_CONFIG when not already configured.
+     */
+    private String customDefaultHedgingConfig;
+
     private boolean skipSyncClientGeneration;
 
     /**
@@ -574,6 +580,14 @@ public class CustomizationConfig {
 
     public void setCustomRetryStrategy(String customRetryStrategy) {
         this.customRetryStrategy = customRetryStrategy;
+    }
+
+    public String getCustomDefaultHedgingConfig() {
+        return customDefaultHedgingConfig;
+    }
+
+    public void setCustomDefaultHedgingConfig(String customDefaultHedgingConfig) {
+        this.customDefaultHedgingConfig = customDefaultHedgingConfig;
     }
 
     public boolean isSkipSyncClientGeneration() {

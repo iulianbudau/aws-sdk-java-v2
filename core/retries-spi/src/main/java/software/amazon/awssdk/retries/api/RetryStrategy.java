@@ -80,6 +80,33 @@ public interface RetryStrategy {
     RecordSuccessResponse recordSuccess(RecordSuccessRequest request);
 
     /**
+     * Invoked before starting a hedged attempt (attempt 2, 3, ΓÇª) when hedging is enabled.
+     *
+     * <p>Default implementation throws {@link UnsupportedOperationException}. Strategies that support
+     * hedging (e.g. token bucket / circuit breaker for hedged attempts) should override this method.
+     * When not supported, the hedging stage may still run hedged attempts but will not call the
+     * token bucket for attempts 2..N.
+     *
+     * @param request the hedge token request (token, attempt index, delay)
+     * @return response with new token and delay until this attempt
+     * @throws UnsupportedOperationException if this strategy does not support hedge token acquisition
+     * @throws TokenAcquisitionFailedException if a token cannot be acquired
+     */
+    default AcquireHedgeTokenResponse acquireTokenForHedgeAttempt(AcquireHedgeTokenRequest request) {
+        throw new UnsupportedOperationException("This retry strategy does not support hedging token acquisition");
+    }
+
+    /**
+     * Returns whether this strategy supports acquiring tokens for hedged attempts.
+     *
+     * <p>Default returns false. Override to return true when {@link #acquireTokenForHedgeAttempt}
+     * is implemented.
+     */
+    default boolean supportsHedging() {
+        return false;
+    }
+
+    /**
      * Returns the maximum numbers attempts that this retry policy will allow.
      *
      * @return the maximum numbers attempts that this retry policy will allow.

@@ -18,9 +18,14 @@ package software.amazon.awssdk.services.dynamodb;
 import static software.amazon.awssdk.retries.api.BackoffStrategy.exponentialDelay;
 
 import java.time.Duration;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
 import software.amazon.awssdk.annotations.SdkInternalApi;
 import software.amazon.awssdk.awscore.retry.AwsRetryPolicy;
 import software.amazon.awssdk.awscore.retry.AwsRetryStrategy;
+import software.amazon.awssdk.core.client.config.HedgingConfig;
 import software.amazon.awssdk.core.client.config.SdkClientConfiguration;
 import software.amazon.awssdk.core.client.config.SdkClientOption;
 import software.amazon.awssdk.core.internal.retry.RetryPolicyAdapter;
@@ -117,5 +122,39 @@ final class DynamoDbRetryPolicy {
                         .profileName(config.option(SdkClientOption.PROFILE_NAME))
                         .defaultRetryMode(config.option(SdkClientOption.DEFAULT_RETRY_MODE))
                         .resolve();
+    }
+
+    /**
+     * Default hedging config for DynamoDB: enabled with 7ms default delay, 3 max hedged attempts,
+     * and idempotent read operations allow-listed (GetItem, BatchGetItem, Query, Scan, etc.).
+     * Used by the DynamoDB client builder when hedging is not explicitly configured.
+     */
+    public static HedgingConfig defaultHedgingConfig() {
+        Duration defaultDelay = Duration.ofMillis(7);
+        Map<String, Duration> delayPerOperation = new HashMap<>();
+        delayPerOperation.put("GetItem", defaultDelay);
+        delayPerOperation.put("BatchGetItem", defaultDelay);
+        delayPerOperation.put("Query", defaultDelay);
+        delayPerOperation.put("Scan", defaultDelay);
+        delayPerOperation.put("DescribeTable", defaultDelay);
+        delayPerOperation.put("DescribeContinuousBackups", defaultDelay);
+        delayPerOperation.put("DescribeContributorInsights", defaultDelay);
+        delayPerOperation.put("DescribeEndpoints", defaultDelay);
+        delayPerOperation.put("DescribeExport", defaultDelay);
+        delayPerOperation.put("DescribeGlobalTable", defaultDelay);
+        delayPerOperation.put("DescribeGlobalTableSettings", defaultDelay);
+        delayPerOperation.put("DescribeImport", defaultDelay);
+        delayPerOperation.put("DescribeKinesisStreamingDestination", defaultDelay);
+        delayPerOperation.put("DescribeLimits", defaultDelay);
+        delayPerOperation.put("DescribeTableReplicaAutoScaling", defaultDelay);
+        delayPerOperation.put("DescribeTimeToLive", defaultDelay);
+        Set<String> hedgeableOperations = Collections.unmodifiableSet(delayPerOperation.keySet());
+        return HedgingConfig.builder()
+                .enabled(true)
+                .defaultDelay(defaultDelay)
+                .maxHedgedAttempts(3)
+                .delayPerOperation(Collections.unmodifiableMap(delayPerOperation))
+                .hedgeableOperations(hedgeableOperations)
+                .build();
     }
 }

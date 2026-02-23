@@ -479,6 +479,12 @@ public class BaseClientBuilderClass implements ClassSpec {
                                  PoetUtils.classNameFromFqcn(model.getCustomizationConfig().getCustomRetryStrategy()));
         }
 
+        if (StringUtils.isNotBlank(model.getCustomizationConfig().getCustomDefaultHedgingConfig())) {
+            builder.addStatement("builder.lazyOptionIfAbsent($T.HEDGING_CONFIG, c -> $T.defaultHedgingConfig())",
+                                 SdkClientOption.class,
+                                 PoetUtils.classNameFromFqcn(model.getCustomizationConfig().getCustomDefaultHedgingConfig()));
+        }
+
         if (StringUtils.isNotBlank(model.getCustomizationConfig().getCustomRetryPolicy())) {
             builder.beginControlFlow("if (builder.option($T.RETRY_STRATEGY) == null)", SdkClientOption.class);
             builder.addStatement("builder.option($1T.RETRY_POLICY, $2T.resolveRetryPolicy(config))",

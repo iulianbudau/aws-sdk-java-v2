@@ -174,6 +174,14 @@ public final class DefaultRetryToken implements RetryToken, ToCopyableBuilder<De
         }
 
         /**
+         * Sets the current attempt count.
+         */
+        public Builder attempt(int attempt) {
+            this.attempt = attempt;
+            return this;
+        }
+
+        /**
          * Increments the current attempt count.
          */
         public Builder increaseAttempt() {

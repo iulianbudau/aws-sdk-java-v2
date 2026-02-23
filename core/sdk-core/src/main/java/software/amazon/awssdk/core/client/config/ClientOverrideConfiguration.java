@@ -28,6 +28,7 @@ import static software.amazon.awssdk.core.client.config.SdkClientOption.CONFIGUR
 import static software.amazon.awssdk.core.client.config.SdkClientOption.CONFIGURED_SCHEDULED_EXECUTOR_SERVICE;
 import static software.amazon.awssdk.core.client.config.SdkClientOption.EXECUTION_ATTRIBUTES;
 import static software.amazon.awssdk.core.client.config.SdkClientOption.EXECUTION_INTERCEPTORS;
+import static software.amazon.awssdk.core.client.config.SdkClientOption.HEDGING_CONFIG;
 import static software.amazon.awssdk.core.client.config.SdkClientOption.METRIC_PUBLISHERS;
 import static software.amazon.awssdk.core.client.config.SdkClientOption.PROFILE_FILE_SUPPLIER;
 import static software.amazon.awssdk.core.client.config.SdkClientOption.PROFILE_NAME;
@@ -121,6 +122,7 @@ public final class ClientOverrideConfiguration
         options.add(CONFIGURED_RETRY_STRATEGY);
         options.add(CONFIGURED_RETRY_CONFIGURATOR);
         options.add(CONFIGURED_RETRY_MODE);
+        options.add(HEDGING_CONFIG);
         options.add(USER_AGENT_APP_ID);
         CLIENT_OVERRIDE_OPTIONS = Collections.unmodifiableSet(options);
 
@@ -322,6 +324,15 @@ public final class ClientOverrideConfiguration
     }
 
     /**
+     * The optional hedging configuration for request hedging (multiple attempts at fixed delays, first success wins).
+     *
+     * @see Builder#hedgingConfig(HedgingConfig)
+     */
+    public Optional<HedgingConfig> hedgingConfig() {
+        return Optional.ofNullable(config.option(HEDGING_CONFIG));
+    }
+
+    /**
      * The profile file supplier that should be used by default for all profile-based configuration in the SDK client.
      *
      * @see Builder#defaultProfileFileSupplier(Supplier)
@@ -397,6 +408,7 @@ public final class ClientOverrideConfiguration
                        .add("headers", headers())
                        .add("retryPolicy", retryPolicy().orElse(null))
                        .add("retryStrategy", retryStrategy().orElse(null))
+                       .add("hedgingConfig", hedgingConfig().orElse(null))
                        .add("apiCallTimeout", apiCallTimeout().orElse(null))
                        .add("apiCallAttemptTimeout", apiCallAttemptTimeout().orElse(null))
                        .add("executionInterceptors", executionInterceptors())
@@ -539,6 +551,19 @@ public final class ClientOverrideConfiguration
         RetryMode retryMode();
 
         Consumer<RetryStrategy.Builder<?, ?>> retryStrategyConfigurator();
+
+        /**
+         * Configure hedging for requests (multiple attempts at fixed delays, first success wins).
+         *
+         * @see ClientOverrideConfiguration#hedgingConfig()
+         * @see HedgingConfig
+         */
+        Builder hedgingConfig(HedgingConfig hedgingConfig);
+
+        /**
+         * The optional hedging configuration.
+         */
+        Optional<HedgingConfig> hedgingConfig();
 
         /**
          * Configure a list of execution interceptors that will have access to read and modify the request and response objcets as
@@ -903,6 +928,17 @@ public final class ClientOverrideConfiguration
         @Override
         public RetryMode retryMode() {
             return config.option(CONFIGURED_RETRY_MODE);
+        }
+
+        @Override
+        public Builder hedgingConfig(HedgingConfig hedgingConfig) {
+            config.option(HEDGING_CONFIG, hedgingConfig);
+            return this;
+        }
+
+        @Override
+        public Optional<HedgingConfig> hedgingConfig() {
+            return Optional.ofNullable(config.option(HEDGING_CONFIG));
         }
 
         @Override

@@ -281,6 +281,30 @@ public class ClientOverrideConfigurationTest {
     }
 
     @Test
+    void hedgingConfig_setAndRetrieved() {
+        HedgingConfig hedgingConfig = HedgingConfig.builder()
+                .enabled(true)
+                .maxHedgedAttempts(3)
+                .build();
+        ClientOverrideConfiguration config = ClientOverrideConfiguration.builder()
+                .hedgingConfig(hedgingConfig)
+                .build();
+        assertThat(config.hedgingConfig()).isPresent();
+        assertThat(config.hedgingConfig().get()).isEqualTo(hedgingConfig);
+    }
+
+    @Test
+    void hedgingConfig_toBuilder_preservesHedgingConfig() {
+        HedgingConfig hedgingConfig = HedgingConfig.builder().enabled(true).maxHedgedAttempts(3).build();
+        ClientOverrideConfiguration config = ClientOverrideConfiguration.builder()
+                .hedgingConfig(hedgingConfig)
+                .build();
+        ClientOverrideConfiguration copied = config.toBuilder().build();
+        assertThat(copied.hedgingConfig()).isPresent();
+        assertThat(copied.hedgingConfig().get()).isEqualTo(hedgingConfig);
+    }
+
+    @Test
     void builder_headersWithEmptyAdditionalHeaders_shouldReturnEmptyMap_shouldNotThrowNullPointerException() {
         ClientOverrideConfiguration.Builder builder = ClientOverrideConfiguration.builder();
         Map<String, List<String>> headers = builder.headers();
