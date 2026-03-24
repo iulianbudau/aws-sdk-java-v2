@@ -107,6 +107,11 @@ public final class DefaultLegacyRetryStrategy
             return this;
         }
 
+        public Builder tokenBucketHedgeTokenCost(int hedgeTokenCost) {
+            setTokenBucketHedgeTokenCost(hedgeTokenCost);
+            return this;
+        }
+
         public Builder tokenBucketThrottlingExceptionCost(int throttlingExceptionCost) {
             this.throttlingExceptionCost = throttlingExceptionCost;
             return this;

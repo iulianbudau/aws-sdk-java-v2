@@ -142,20 +142,27 @@ public final class HedgingConfig implements ToCopyableBuilder<HedgingConfig.Buil
 
     /**
      * Resolve the delay before starting hedged attempt at the given index (1-based). Attempt 1 has delay 0.
-     * Uses {@link #delayPerOperation()} for the given operation name if present, otherwise {@link #defaultDelay()}.
+     * Subsequent attempts are staggered: attempt 2 at baseDelay, attempt 3 at 2*baseDelay, etc.
+     * Base delay comes from {@link #delayPerOperation()} for the given operation if present,
+     * otherwise {@link #defaultDelay()}.
      *
      * @param attemptIndex 1-based attempt index (1 = first attempt, 2 = first hedge, etc.)
      * @param operationName operation name from execution context, or null
-     * @return delay before this attempt (zero for attempt 1)
+     * @return delay before this attempt (zero for attempt 1; (attemptIndex - 1) * baseDelay for attempt 2+)
      */
     public Duration delayBeforeAttempt(int attemptIndex, String operationName) {
         if (attemptIndex <= 1) {
             return Duration.ZERO;
         }
+        Duration baseDelay;
         if (operationName != null && delayPerOperation.containsKey(operationName)) {
-            return delayPerOperation.get(operationName);
+            baseDelay = delayPerOperation.get(operationName);
+        } else {
+            baseDelay = defaultDelay != null ? defaultDelay : Duration.ZERO;
         }
-        return defaultDelay != null ? defaultDelay : Duration.ZERO;
+        long baseMs = baseDelay.toMillis();
+        long delayMs = baseMs * (attemptIndex - 1);
+        return Duration.ofMillis(delayMs);
     }
 
     /**

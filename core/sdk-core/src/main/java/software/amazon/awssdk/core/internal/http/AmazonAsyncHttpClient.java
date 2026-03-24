@@ -19,6 +19,7 @@ import static software.amazon.awssdk.core.internal.http.pipeline.RequestPipeline
 
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import software.amazon.awssdk.annotations.SdkInternalApi;
 import software.amazon.awssdk.annotations.ThreadSafe;
 import software.amazon.awssdk.core.ClientType;
@@ -138,6 +139,19 @@ public final class AmazonAsyncHttpClient implements SdkAutoCloseable {
          * @return Unmarshalled result type.
          */
         <OutputT> CompletableFuture<OutputT> execute(TransformingAsyncResponseHandler<Response<OutputT>> responseHandler);
+
+        /**
+         * Executes the request with the given configuration, with support for hedging.
+         *
+         * @param responseHandler Response handler for the retry path (sequential execution)
+         * @param responseHandlerFactory Factory to create fresh response handlers for hedging (concurrent execution).
+         *                               Each hedge attempt gets its own isolated handler to prevent race conditions.
+         * @param <OutputT>       Result type
+         * @return Unmarshalled result type.
+         */
+        <OutputT> CompletableFuture<OutputT> execute(
+            TransformingAsyncResponseHandler<Response<OutputT>> responseHandler,
+            Supplier<TransformingAsyncResponseHandler<Response<OutputT>>> responseHandlerFactory);
     }
 
     private static class RequestExecutionBuilderImpl implements RequestExecutionBuilder {
@@ -187,6 +201,16 @@ public final class AmazonAsyncHttpClient implements SdkAutoCloseable {
         @Override
         public <OutputT> CompletableFuture<OutputT> execute(
             TransformingAsyncResponseHandler<Response<OutputT>> responseHandler) {
+            // Default implementation uses same handler for both retry and hedging paths.
+            // This is correct for retry (sequential), but hedging will use the handler as-is
+            // which means concurrent attempts may share state (not ideal, but backward compatible).
+            return execute(responseHandler, () -> responseHandler);
+        }
+
+        @Override
+        public <OutputT> CompletableFuture<OutputT> execute(
+            TransformingAsyncResponseHandler<Response<OutputT>> responseHandler,
+            Supplier<TransformingAsyncResponseHandler<Response<OutputT>>> responseHandlerFactory) {
 
             try {
                 return RequestPipelineBuilder
@@ -205,8 +229,11 @@ public final class AmazonAsyncHttpClient implements SdkAutoCloseable {
                                         .then(AsyncBeforeTransmissionExecutionInterceptorsStage::new)
                                         .then(d -> new MakeAsyncHttpRequestStage<>(responseHandler, d))
                                         .wrappedWith(AsyncApiCallAttemptMetricCollectionStage::new)
-                                        .wrappedWith((deps, wrapped) -> new AsyncRetryOrHedgingStage<>(responseHandler, deps,
-                                                                                                  wrapped))
+                                        .wrappedWith((deps, wrapped) -> new AsyncRetryOrHedgingStage<>(
+                                            responseHandler,
+                                            responseHandlerFactory,
+                                            deps,
+                                            wrapped))
                                         .then(async(() -> new UnwrapResponseContainer<>()))
                                         .then(async(() -> new AfterExecutionInterceptorsStage<>()))
                                         .wrappedWith(AsyncExecutionFailureExceptionReportingStage::new)

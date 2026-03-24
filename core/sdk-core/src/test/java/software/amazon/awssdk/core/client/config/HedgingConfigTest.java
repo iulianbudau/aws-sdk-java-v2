@@ -81,8 +81,24 @@ public class HedgingConfigTest {
             .maxHedgedAttempts(3)
             .delayPerOperation(Collections.singletonMap("GetItem", Duration.ofMillis(5)))
             .build();
+        // Staggered: attempt 2 = 1*base, attempt 3 = 2*base
         assertThat(config.delayBeforeAttempt(2, "GetItem")).isEqualTo(Duration.ofMillis(5));
+        assertThat(config.delayBeforeAttempt(3, "GetItem")).isEqualTo(Duration.ofMillis(10));
         assertThat(config.delayBeforeAttempt(2, "OtherOp")).isEqualTo(Duration.ofMillis(10));
+        assertThat(config.delayBeforeAttempt(3, "OtherOp")).isEqualTo(Duration.ofMillis(20));
+    }
+
+    @Test
+    public void delayBeforeAttempt_staggeredByAttemptIndex() {
+        HedgingConfig config = HedgingConfig.builder()
+            .enabled(true)
+            .defaultDelay(Duration.ofMillis(7))
+            .maxHedgedAttempts(4)
+            .build();
+        assertThat(config.delayBeforeAttempt(1, "GetItem")).isEqualTo(Duration.ZERO);
+        assertThat(config.delayBeforeAttempt(2, "GetItem")).isEqualTo(Duration.ofMillis(7));
+        assertThat(config.delayBeforeAttempt(3, "GetItem")).isEqualTo(Duration.ofMillis(14));
+        assertThat(config.delayBeforeAttempt(4, "GetItem")).isEqualTo(Duration.ofMillis(21));
     }
 
     @Test

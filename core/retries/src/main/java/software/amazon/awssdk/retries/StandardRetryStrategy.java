@@ -64,6 +64,7 @@ public interface StandardRetryStrategy extends RetryStrategy {
                                   .tokenBucketMaxCapacity(DefaultRetryStrategy.Standard.TOKEN_BUCKET_SIZE)
                                   .build())
             .tokenBucketExceptionCost(DefaultRetryStrategy.Standard.DEFAULT_EXCEPTION_TOKEN_COST)
+            .tokenBucketHedgeTokenCost(DefaultRetryStrategy.Standard.DEFAULT_HEDGE_TOKEN_COST)
             .backoffStrategy(BackoffStrategy.exponentialDelay(DefaultRetryStrategy.Standard.BASE_DELAY,
                                                               DefaultRetryStrategy.Standard.MAX_BACKOFF))
             .throttlingBackoffStrategy(BackoffStrategy.exponentialDelay(DefaultRetryStrategy.Standard.THROTTLED_BASE_DELAY,

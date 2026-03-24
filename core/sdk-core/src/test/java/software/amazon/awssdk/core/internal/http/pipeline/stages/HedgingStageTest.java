@@ -20,9 +20,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -33,8 +31,11 @@ import static software.amazon.awssdk.core.internal.InternalCoreExecutionAttribut
 import static software.amazon.awssdk.core.internal.InternalCoreExecutionAttribute.RETRY_TOKEN;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -50,10 +51,11 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import software.amazon.awssdk.core.Response;
 import software.amazon.awssdk.core.SdkRequestOverrideConfiguration;
-import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
 import software.amazon.awssdk.core.client.config.HedgingConfig;
 import software.amazon.awssdk.core.client.config.SdkClientConfiguration;
+import software.amazon.awssdk.core.exception.NonRetryableException;
 import software.amazon.awssdk.core.exception.SdkException;
+import software.amazon.awssdk.core.exception.RetryableException;
 import software.amazon.awssdk.core.http.ExecutionContext;
 import software.amazon.awssdk.core.http.NoopTestRequest;
 import software.amazon.awssdk.core.interceptor.ExecutionAttributes;
@@ -61,7 +63,9 @@ import software.amazon.awssdk.core.interceptor.SdkExecutionAttribute;
 import software.amazon.awssdk.core.internal.http.HttpClientDependencies;
 import software.amazon.awssdk.core.internal.http.RequestExecutionContext;
 import software.amazon.awssdk.core.internal.http.pipeline.RequestPipeline;
+import software.amazon.awssdk.core.metrics.CoreMetric;
 import software.amazon.awssdk.http.SdkHttpFullRequest;
+import software.amazon.awssdk.metrics.MetricCollector;
 import software.amazon.awssdk.http.SdkHttpMethod;
 import software.amazon.awssdk.http.SdkHttpResponse;
 import software.amazon.awssdk.retries.api.AcquireHedgeTokenRequest;
@@ -85,6 +89,9 @@ public class HedgingStageTest {
 
     @Mock
     private ScheduledFuture<?> scheduledFuture;
+
+    @Mock
+    private MetricCollector metricCollector;
 
     private HedgingStage<String> hedgingStage;
     private HttpClientDependencies dependencies;
@@ -191,12 +198,18 @@ public class HedgingStageTest {
     @Test
     @Timeout(5)
     public void firstAttemptFails_secondAttemptSucceeds_shouldReturnSecond() throws Exception {
+        // Run supplyAsync tasks on executorService so main thread can reach scheduleHedgedAttempts before attempt 1 completes
+        doAnswer(invocation -> {
+            executorService.submit(invocation.getArgument(0, Runnable.class));
+            return null;
+        }).when(scheduledExecutor).execute(any(Runnable.class));
+
         Response<String> successResponse = Response.<String>builder()
             .httpResponse(SdkHttpResponse.builder().statusCode(200).build())
             .isSuccess(true)
             .build();
 
-        SdkException failureException = SdkException.builder().message("First attempt failed").build();
+        SdkException failureException = RetryableException.builder().message("First attempt failed").build();
         Response<String> failureResponse = Response.<String>builder()
             .httpResponse(SdkHttpResponse.builder().statusCode(500).build())
             .exception(failureException)
@@ -207,6 +220,11 @@ public class HedgingStageTest {
         when(requestPipeline.execute(any(), any())).thenAnswer(invocation -> {
             int count = callCount.incrementAndGet();
             if (count == 1) {
+                try {
+                    Thread.sleep(40);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
                 return failureResponse;
             } else {
                 return successResponse;
@@ -221,8 +239,62 @@ public class HedgingStageTest {
 
     @Test
     @Timeout(5)
+    public void hedgingRequestHeader_shouldContainAttemptMaxAndDelay() throws Exception {
+        // Run supplyAsync tasks on executorService so main thread can reach scheduleHedgedAttempts before attempt 1 completes
+        doAnswer(invocation -> {
+            executorService.submit(invocation.getArgument(0, Runnable.class));
+            return null;
+        }).when(scheduledExecutor).execute(any(Runnable.class));
+
+        Response<String> successResponse = Response.<String>builder()
+            .httpResponse(SdkHttpResponse.builder().statusCode(200).build())
+            .isSuccess(true)
+            .build();
+
+        SdkException failureException = RetryableException.builder().message("First attempt failed").build();
+        Response<String> failureResponse = Response.<String>builder()
+            .httpResponse(SdkHttpResponse.builder().statusCode(500).build())
+            .exception(failureException)
+            .isSuccess(false)
+            .build();
+
+        // Hedged attempts run concurrently; collect executed requests in a thread-safe list.
+        List<SdkHttpFullRequest> executedRequests = Collections.synchronizedList(new ArrayList<>());
+        AtomicInteger callCount = new AtomicInteger(0);
+        when(requestPipeline.execute(any(), any())).thenAnswer(invocation -> {
+            SdkHttpFullRequest attemptRequest = invocation.getArgument(0);
+            executedRequests.add(attemptRequest);
+            int count = callCount.incrementAndGet();
+            if (count == 1) {
+                return failureResponse;
+            } else {
+                return successResponse;
+            }
+        });
+
+        Response<String> result = hedgingStage.execute(request, context);
+
+        assertThat(result).isEqualTo(successResponse);
+        assertThat(executedRequests.size()).isGreaterThanOrEqualTo(2);
+
+        List<SdkHttpFullRequest> executedRequestsSnapshot;
+        synchronized (executedRequests) {
+            executedRequestsSnapshot = new ArrayList<>(executedRequests);
+        }
+
+        List<String> hedgeHeaders = new ArrayList<>();
+        for (SdkHttpFullRequest r : executedRequestsSnapshot) {
+            assertThat(r.firstMatchingHeader("amz-sdk-request")).isEmpty();
+            hedgeHeaders.add(r.firstMatchingHeader("amz-sdk-hedge-request").orElse(null));
+        }
+
+        assertThat(hedgeHeaders).contains("attempt=1; max=3; delay=0ms", "attempt=2; max=3; delay=10ms");
+    }
+
+    @Test
+    @Timeout(5)
     public void allAttemptsFail_shouldThrowAggregatedException() throws Exception {
-        SdkException failureException = SdkException.builder().message("Attempt failed").build();
+        SdkException failureException = RetryableException.builder().message("Attempt failed").build();
         Response<String> failureResponse = Response.<String>builder()
             .httpResponse(SdkHttpResponse.builder().statusCode(500).build())
             .exception(failureException)
@@ -270,11 +342,47 @@ public class HedgingStageTest {
             .httpResponse(SdkHttpResponse.builder().statusCode(200).build())
             .isSuccess(true)
             .build();
-        when(requestPipeline.execute(any(), any())).thenReturn(successResponse);
+        
+        // Delay attempt 1 so scheduled tasks can acquire tokens before it completes
+        CountDownLatch attempt1Started = new CountDownLatch(1);
+        CountDownLatch canComplete = new CountDownLatch(1);
+        when(requestPipeline.execute(any(), any())).thenAnswer(invocation -> {
+            attempt1Started.countDown();
+            canComplete.await(2, TimeUnit.SECONDS);
+            return successResponse;
+        });
 
-        hedgingStage.execute(request, context);
+        // Run scheduled tasks which will acquire tokens
+        when(scheduledExecutor.schedule(any(Runnable.class), anyLong(), eq(TimeUnit.MILLISECONDS)))
+            .thenAnswer(invocation -> {
+                Runnable task = invocation.getArgument(0);
+                new Thread(() -> {
+                    try {
+                        attempt1Started.await(1, TimeUnit.SECONDS);
+                        Thread.sleep(5);
+                        task.run();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }).start();
+                return scheduledFuture;
+            });
 
+        // Execute in separate thread since it blocks
+        CompletableFuture<Response<String>> result = CompletableFuture.supplyAsync(() -> {
+            try {
+                return hedgingStage.execute(request, context);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }, executorService);
+
+        // Wait for scheduled tasks to acquire tokens
         Thread.sleep(50);
+        // Allow attempt 1 to complete
+        canComplete.countDown();
+        
+        result.get(2, TimeUnit.SECONDS);
         verify(retryStrategy, times(2)).acquireTokenForHedgeAttempt(any(AcquireHedgeTokenRequest.class));
     }
 
@@ -455,15 +563,15 @@ public class HedgingStageTest {
         hedgingStage.execute(request, context);
 
         Thread.sleep(50);
-        // Should use 5ms delay for GetItem operation
+        // GetItem base delay 5ms: attempt 2 at 5ms, attempt 3 at 10ms (staggered)
         List<Long> delays = delayCaptor.getAllValues();
-        assertThat(delays).contains(5L);
+        assertThat(delays).contains(5L, 10L);
     }
 
     @Test
     @Timeout(5)
     public void exceptionFromPipeline_shouldHandleGracefully() throws Exception {
-        SdkException exception = SdkException.builder().message("Pipeline exception").build();
+        SdkException exception = RetryableException.builder().message("Pipeline exception").build();
         Response<String> failureResponse = Response.<String>builder()
             .httpResponse(SdkHttpResponse.builder().statusCode(500).build())
             .exception(exception)
@@ -480,9 +588,9 @@ public class HedgingStageTest {
     @Test
     @Timeout(5)
     public void multipleFailures_shouldAggregateExceptions() throws Exception {
-        SdkException exception1 = SdkException.builder().message("First failure").build();
-        SdkException exception2 = SdkException.builder().message("Second failure").build();
-        SdkException exception3 = SdkException.builder().message("Third failure").build();
+        SdkException exception1 = RetryableException.builder().message("First failure").build();
+        SdkException exception2 = RetryableException.builder().message("Second failure").build();
+        SdkException exception3 = RetryableException.builder().message("Third failure").build();
 
         Response<String> failureResponse1 = Response.<String>builder()
             .httpResponse(SdkHttpResponse.builder().statusCode(500).build())
@@ -516,5 +624,289 @@ public class HedgingStageTest {
 
         assertThatThrownBy(() -> hedgingStage.execute(request, context))
             .isInstanceOf(SdkException.class);
+    }
+
+    @Test
+    @Timeout(5)
+    public void firstAttemptSucceeds_reportsHedgeCountZero() throws Exception {
+        RequestExecutionContext contextWithMetrics = RequestExecutionContext.builder()
+            .originalRequest(context.originalRequest())
+            .executionContext(ExecutionContext.builder()
+                .executionAttributes(context.executionContext().executionAttributes())
+                .metricCollector(metricCollector)
+                .build())
+            .build();
+
+        Response<String> successResponse = Response.<String>builder()
+            .httpResponse(SdkHttpResponse.builder().statusCode(200).build())
+            .isSuccess(true)
+            .build();
+        when(requestPipeline.execute(any(), any())).thenReturn(successResponse);
+        // Do not run scheduled hedge tasks so only attempt 1 runs → HEDGE_COUNT = 0
+        when(scheduledExecutor.schedule(any(Runnable.class), anyLong(), eq(TimeUnit.MILLISECONDS)))
+            .thenReturn((ScheduledFuture) scheduledFuture);
+
+        Response<String> result = hedgingStage.execute(request, contextWithMetrics);
+
+        assertThat(result).isEqualTo(successResponse);
+        verify(metricCollector).reportMetric(eq(CoreMetric.HEDGE_COUNT), eq(0));
+    }
+
+    @Test
+    @Timeout(5)
+    public void firstAttemptFails_secondSucceeds_reportsHedgeCountOne() throws Exception {
+        RequestExecutionContext contextWithMetrics = RequestExecutionContext.builder()
+            .originalRequest(context.originalRequest())
+            .executionContext(ExecutionContext.builder()
+                .executionAttributes(context.executionContext().executionAttributes())
+                .metricCollector(metricCollector)
+                .build())
+            .build();
+
+        SdkClientConfiguration configWithTwoAttempts = SdkClientConfiguration.builder()
+            .option(RETRY_STRATEGY, retryStrategy)
+            .option(HEDGING_CONFIG, HedgingConfig.builder()
+                .enabled(true)
+                .maxHedgedAttempts(2)
+                .defaultDelay(Duration.ofMillis(10))
+                .build())
+            .option(SCHEDULED_EXECUTOR_SERVICE, scheduledExecutor)
+            .build();
+        dependencies = HttpClientDependencies.builder().clientConfiguration(configWithTwoAttempts).build();
+        hedgingStage = new HedgingStage<>(dependencies, requestPipeline);
+        doAnswer(invocation -> {
+            invocation.getArgument(0, Runnable.class).run();
+            return null;
+        }).when(scheduledExecutor).execute(any(Runnable.class));
+        when(scheduledExecutor.schedule(any(Runnable.class), anyLong(), eq(TimeUnit.MILLISECONDS)))
+            .thenAnswer(invocation -> {
+                Runnable task = invocation.getArgument(0, Runnable.class);
+                executorService.submit(() -> {
+                    try {
+                        Thread.sleep(15);
+                        task.run();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                });
+                return scheduledFuture;
+            });
+        doAnswer(invocation -> {
+            executorService.submit(invocation.getArgument(0, Runnable.class));
+            return null;
+        }).when(scheduledExecutor).execute(any(Runnable.class));
+
+        SdkException failureException = RetryableException.builder().message("First attempt failed").build();
+        Response<String> failureResponse = Response.<String>builder()
+            .httpResponse(SdkHttpResponse.builder().statusCode(500).build())
+            .exception(failureException)
+            .isSuccess(false)
+            .build();
+        Response<String> successResponse = Response.<String>builder()
+            .httpResponse(SdkHttpResponse.builder().statusCode(200).build())
+            .isSuccess(true)
+            .build();
+
+        AtomicInteger callCount = new AtomicInteger(0);
+        when(requestPipeline.execute(any(), any())).thenAnswer(invocation -> {
+            int count = callCount.incrementAndGet();
+            if (count == 1) {
+                try {
+                    Thread.sleep(40);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                return failureResponse;
+            }
+            return successResponse;
+        });
+
+        Response<String> result = hedgingStage.execute(request, contextWithMetrics);
+
+        assertThat(result).isEqualTo(successResponse);
+        assertThat(callCount.get()).isGreaterThanOrEqualTo(2);
+        verify(metricCollector).reportMetric(eq(CoreMetric.HEDGE_COUNT), eq(1));
+    }
+
+    @Test
+    @Timeout(5)
+    public void allAttemptsFail_reportsHedgeCountTwo() throws Exception {
+        RequestExecutionContext contextWithMetrics = RequestExecutionContext.builder()
+            .originalRequest(context.originalRequest())
+            .executionContext(ExecutionContext.builder()
+                .executionAttributes(context.executionContext().executionAttributes())
+                .metricCollector(metricCollector)
+                .build())
+            .build();
+
+        SdkException failureException = RetryableException.builder().message("Attempt failed").build();
+        Response<String> failureResponse = Response.<String>builder()
+            .httpResponse(SdkHttpResponse.builder().statusCode(500).build())
+            .exception(failureException)
+            .isSuccess(false)
+            .build();
+        AtomicInteger executeCallCount = new AtomicInteger(0);
+        when(requestPipeline.execute(any(), any())).thenAnswer(invocation -> {
+            int count = executeCallCount.incrementAndGet();
+            if (count == 1) {
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            return failureResponse;
+        });
+        when(scheduledExecutor.schedule(any(Runnable.class), anyLong(), eq(TimeUnit.MILLISECONDS)))
+            .thenAnswer(invocation -> {
+                Runnable task = invocation.getArgument(0);
+                executorService.submit(() -> {
+                    try {
+                        Thread.sleep(15);
+                        task.run();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                });
+                return scheduledFuture;
+            });
+        // Run supplyAsync tasks asynchronously so main thread reaches scheduleHedgedAttempts before attempt 1 completes
+        doAnswer(invocation -> {
+            executorService.submit(invocation.getArgument(0, Runnable.class));
+            return null;
+        }).when(scheduledExecutor).execute(any(Runnable.class));
+
+        assertThatThrownBy(() -> hedgingStage.execute(request, contextWithMetrics))
+            .isInstanceOf(SdkException.class)
+            .hasMessageContaining("Attempt failed");
+
+        verify(metricCollector).reportMetric(eq(CoreMetric.HEDGE_COUNT), eq(2));
+    }
+
+    /**
+     * When the first attempt fails immediately (before attempt 2 actually starts running), we must NOT fail fast:
+     * we keep the hedge plan alive so attempt 2 can start and succeed, as long as the error is retryable.
+     */
+    @Test
+    @Timeout(5)
+    public void firstAttemptFailsImmediately_beforeSecondStarts_doesNotFailFast_secondSucceeds() throws Exception {
+        when(retryStrategy.supportsHedging()).thenReturn(false);
+        doAnswer(invocation -> {
+            executorService.submit(invocation.getArgument(0, Runnable.class));
+            return null;
+        }).when(scheduledExecutor).execute(any(Runnable.class));
+
+        Response<String> successResponse = Response.<String>builder()
+            .httpResponse(SdkHttpResponse.builder().statusCode(200).build())
+            .isSuccess(true)
+            .build();
+        SdkException failureException = RetryableException.create("First attempt failed");
+        Response<String> failureResponse = Response.<String>builder()
+            .httpResponse(SdkHttpResponse.builder().statusCode(500).build())
+            .exception(failureException)
+            .isSuccess(false)
+            .build();
+
+        AtomicInteger callCount = new AtomicInteger(0);
+        when(requestPipeline.execute(any(), any())).thenAnswer(invocation -> {
+            int count = callCount.incrementAndGet();
+            if (count == 1) {
+                // First attempt fails immediately, before attempt 2's delayed start
+                return failureResponse;
+            }
+            return successResponse;
+        });
+        when(scheduledExecutor.schedule(any(Runnable.class), anyLong(), eq(TimeUnit.MILLISECONDS)))
+            .thenAnswer(invocation -> {
+                Runnable task = invocation.getArgument(0);
+                // Attempt 2 (and any others) begin after a delay; at the time of attempt 1's failure,
+                // this task has only been scheduled, not yet executed.
+                executorService.submit(() -> {
+                    try {
+                        Thread.sleep(30);
+                        task.run();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                });
+                return scheduledFuture;
+            });
+
+        Response<String> result = hedgingStage.execute(request, context);
+
+        assertThat(result).isEqualTo(successResponse);
+        assertThat(callCount.get()).as("Should not fail fast; attempt 2 must have run").isGreaterThanOrEqualTo(2);
+    }
+
+    /**
+     * Non-retryable error on first attempt: fail immediately after first attempt, do not start hedge attempts.
+     * Scheduled tasks are not run so only attempt 1 executes; we assert pipeline is called once.
+     */
+    @Test
+    @Timeout(5)
+    public void nonRetryableError_failsAfterFirstAttempt_doesNotStartHedgeAttempts() throws Exception {
+        NonRetryableException nonRetryable = NonRetryableException.create("Validation failed");
+        Response<String> failureResponse = Response.<String>builder()
+            .httpResponse(SdkHttpResponse.builder().statusCode(400).build())
+            .exception(nonRetryable)
+            .isSuccess(false)
+            .build();
+        when(requestPipeline.execute(any(), any())).thenReturn(failureResponse);
+        when(scheduledExecutor.schedule(any(Runnable.class), anyLong(), eq(TimeUnit.MILLISECONDS)))
+            .thenReturn((ScheduledFuture) scheduledFuture);
+
+        assertThatThrownBy(() -> hedgingStage.execute(request, context))
+            .isInstanceOf(NonRetryableException.class)
+            .hasMessageContaining("Validation failed");
+        verify(requestPipeline, times(1)).execute(any(), any());
+    }
+
+    /**
+     * When fewer than maxHedgedAttempts are started (e.g. hedge token acquisition fails for attempts 2 and 3),
+     * and all started attempts fail, the stage must still complete with aggregated failure.
+     */
+    @Test
+    @Timeout(5)
+    public void fewerAttemptsStarted_allFail_shouldCompleteWithAggregatedFailure() throws Exception {
+        when(retryStrategy.supportsHedging()).thenReturn(true);
+        when(retryStrategy.acquireTokenForHedgeAttempt(any(AcquireHedgeTokenRequest.class)))
+            .thenThrow(new TokenAcquisitionFailedException("No tokens"));
+
+        SdkException failureException = RetryableException.builder().message("Attempt 1 failed").build();
+        Response<String> failureResponse = Response.<String>builder()
+            .httpResponse(SdkHttpResponse.builder().statusCode(500).build())
+            .exception(failureException)
+            .isSuccess(false)
+            .build();
+        when(requestPipeline.execute(any(), any())).thenReturn(failureResponse);
+        when(scheduledExecutor.schedule(any(Runnable.class), anyLong(), eq(TimeUnit.MILLISECONDS)))
+            .thenAnswer(invocation -> {
+                invocation.getArgument(0, Runnable.class).run();
+                return scheduledFuture;
+            });
+
+        assertThatThrownBy(() -> hedgingStage.execute(request, context))
+            .isInstanceOf(SdkException.class)
+            .hasMessageContaining("Attempt 1 failed");
+        verify(requestPipeline, times(1)).execute(any(), any());
+    }
+
+    /**
+     * When an attempt completes with null (pipeline returns null), the stage must complete exceptionally
+     * so the caller is not left hanging.
+     */
+    @Test
+    @Timeout(5)
+    public void attemptCompletesWithNullResponseAndNullException_shouldCompleteExceptionally() throws Exception {
+        when(requestPipeline.execute(any(), any())).thenReturn(null);
+        when(scheduledExecutor.schedule(any(Runnable.class), anyLong(), eq(TimeUnit.MILLISECONDS)))
+            .thenAnswer(invocation -> {
+                invocation.getArgument(0, Runnable.class).run();
+                return scheduledFuture;
+            });
+
+        assertThatThrownBy(() -> hedgingStage.execute(request, context))
+            .isInstanceOf(SdkException.class)
+            .hasMessageContaining("null response and null exception");
     }
 }

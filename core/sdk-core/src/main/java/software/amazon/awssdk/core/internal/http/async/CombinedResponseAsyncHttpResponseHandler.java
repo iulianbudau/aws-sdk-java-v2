@@ -19,6 +19,7 @@ import static software.amazon.awssdk.core.SdkStandardLogger.logRequestId;
 
 import java.nio.ByteBuffer;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Supplier;
 import org.reactivestreams.Publisher;
 import software.amazon.awssdk.annotations.SdkInternalApi;
 import software.amazon.awssdk.core.Response;
@@ -38,6 +39,8 @@ public final class CombinedResponseAsyncHttpResponseHandler<OutputT>
 
     private final TransformingAsyncResponseHandler<OutputT> successResponseHandler;
     private final TransformingAsyncResponseHandler<? extends SdkException> errorResponseHandler;
+    private final Supplier<TransformingAsyncResponseHandler<OutputT>> successHandlerFactory;
+    private final Supplier<TransformingAsyncResponseHandler<? extends SdkException>> errorHandlerFactory;
     private CompletableFuture<SdkHttpResponse> headersFuture;
 
     public CombinedResponseAsyncHttpResponseHandler(
@@ -46,6 +49,47 @@ public final class CombinedResponseAsyncHttpResponseHandler<OutputT>
 
         this.successResponseHandler = successResponseHandler;
         this.errorResponseHandler = errorResponseHandler;
+        this.successHandlerFactory = null;
+        this.errorHandlerFactory = null;
+    }
+
+    /**
+     * Creates a CombinedResponseAsyncHttpResponseHandler with factories for creating new handler instances.
+     * This is used by hedging to create isolated handlers per attempt, preventing race conditions.
+     *
+     * @param successResponseHandler The success handler for this instance
+     * @param errorResponseHandler The error handler for this instance
+     * @param successHandlerFactory Factory to create new success handlers for hedging
+     * @param errorHandlerFactory Factory to create new error handlers for hedging
+     */
+    public CombinedResponseAsyncHttpResponseHandler(
+        TransformingAsyncResponseHandler<OutputT> successResponseHandler,
+        TransformingAsyncResponseHandler<? extends SdkException> errorResponseHandler,
+        Supplier<TransformingAsyncResponseHandler<OutputT>> successHandlerFactory,
+        Supplier<TransformingAsyncResponseHandler<? extends SdkException>> errorHandlerFactory) {
+
+        this.successResponseHandler = successResponseHandler;
+        this.errorResponseHandler = errorResponseHandler;
+        this.successHandlerFactory = successHandlerFactory;
+        this.errorHandlerFactory = errorHandlerFactory;
+    }
+
+    /**
+     * Creates a new instance of this handler with fresh mutable state, suitable for concurrent hedging.
+     * If factories were provided, creates new underlying handlers; otherwise reuses the existing ones.
+     *
+     * @return A new CombinedResponseAsyncHttpResponseHandler instance for a hedge attempt
+     */
+    public CombinedResponseAsyncHttpResponseHandler<OutputT> createForHedging() {
+        if (successHandlerFactory != null && errorHandlerFactory != null) {
+            return new CombinedResponseAsyncHttpResponseHandler<>(
+                successHandlerFactory.get(),
+                errorHandlerFactory.get(),
+                successHandlerFactory,
+                errorHandlerFactory);
+        }
+        // Fallback: create new instance but reuse handlers (not fully isolated but better than shared headersFuture)
+        return new CombinedResponseAsyncHttpResponseHandler<>(successResponseHandler, errorResponseHandler);
     }
 
     @Override

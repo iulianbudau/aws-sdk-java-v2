@@ -18,8 +18,9 @@ package software.amazon.awssdk.services.dynamodb;
 import static software.amazon.awssdk.retries.api.BackoffStrategy.exponentialDelay;
 
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import software.amazon.awssdk.annotations.SdkInternalApi;
@@ -57,6 +58,19 @@ final class DynamoDbRetryPolicy {
      * Default base sleep time for DynamoDB, regardless of retry mode.
      **/
     private static final Duration BASE_DELAY = Duration.ofMillis(25);
+
+    /** Default delay before starting additional hedged attempts when hedging is enabled. */
+    private static final Duration HEDGE_DELAY = Duration.ofMillis(10);
+
+    /** Delay before the first hedged attempt for GetItem when using per-operation delay. */
+    private static final Duration GET_ITEM_HEDGE_DELAY = Duration.ofMillis(8);
+
+    /** Maximum number of hedged attempts (including the first) when hedging is enabled. */
+    private static final int MAX_HEDGE_ATTEMPTS = 3;
+
+    /** Operation names that are safe to hedge (idempotent reads). */
+    private static final Set<String> HEDGEABLE_OPERATIONS =
+        Collections.unmodifiableSet(new HashSet<>(Arrays.asList("GetItem", "Query", "Scan")));
 
     /**
      * The default back-off strategy for DynamoDB client, which increases
@@ -125,36 +139,20 @@ final class DynamoDbRetryPolicy {
     }
 
     /**
-     * Default hedging config for DynamoDB: enabled with 7ms default delay, 3 max hedged attempts,
-     * and idempotent read operations allow-listed (GetItem, BatchGetItem, Query, Scan, etc.).
-     * Used by the DynamoDB client builder when hedging is not explicitly configured.
+     * Default hedging config for DynamoDB: disabled by default, with {@link #HEDGE_DELAY} as default
+     * delay, {@value #MAX_HEDGE_ATTEMPTS} max hedged attempts, GetItem-specific delay
+     * {@link #GET_ITEM_HEDGE_DELAY}, and only GetItem, Query and Scan allow-listed as hedgeable.
+     * Used by the DynamoDB client builder when hedging is not explicitly configured. Callers must
+     * set {@code enabled(true)} to use hedging.
      */
     public static HedgingConfig defaultHedgingConfig() {
-        Duration defaultDelay = Duration.ofMillis(7);
-        Map<String, Duration> delayPerOperation = new HashMap<>();
-        delayPerOperation.put("GetItem", defaultDelay);
-        delayPerOperation.put("BatchGetItem", defaultDelay);
-        delayPerOperation.put("Query", defaultDelay);
-        delayPerOperation.put("Scan", defaultDelay);
-        delayPerOperation.put("DescribeTable", defaultDelay);
-        delayPerOperation.put("DescribeContinuousBackups", defaultDelay);
-        delayPerOperation.put("DescribeContributorInsights", defaultDelay);
-        delayPerOperation.put("DescribeEndpoints", defaultDelay);
-        delayPerOperation.put("DescribeExport", defaultDelay);
-        delayPerOperation.put("DescribeGlobalTable", defaultDelay);
-        delayPerOperation.put("DescribeGlobalTableSettings", defaultDelay);
-        delayPerOperation.put("DescribeImport", defaultDelay);
-        delayPerOperation.put("DescribeKinesisStreamingDestination", defaultDelay);
-        delayPerOperation.put("DescribeLimits", defaultDelay);
-        delayPerOperation.put("DescribeTableReplicaAutoScaling", defaultDelay);
-        delayPerOperation.put("DescribeTimeToLive", defaultDelay);
-        Set<String> hedgeableOperations = Collections.unmodifiableSet(delayPerOperation.keySet());
+        Map<String, Duration> delayPerOperation = Collections.singletonMap("GetItem", GET_ITEM_HEDGE_DELAY);
         return HedgingConfig.builder()
-                .enabled(true)
-                .defaultDelay(defaultDelay)
-                .maxHedgedAttempts(3)
-                .delayPerOperation(Collections.unmodifiableMap(delayPerOperation))
-                .hedgeableOperations(hedgeableOperations)
+                .enabled(false)
+                .defaultDelay(HEDGE_DELAY)
+                .maxHedgedAttempts(MAX_HEDGE_ATTEMPTS)
+                .delayPerOperation(delayPerOperation)
+                .hedgeableOperations(HEDGEABLE_OPERATIONS)
                 .build();
     }
 }

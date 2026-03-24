@@ -18,6 +18,7 @@ package software.amazon.awssdk.core.internal;
 import software.amazon.awssdk.annotations.SdkInternalApi;
 import software.amazon.awssdk.core.interceptor.ExecutionAttribute;
 import software.amazon.awssdk.core.interceptor.SdkExecutionAttribute;
+import software.amazon.awssdk.core.internal.http.TransformingAsyncResponseHandler;
 import software.amazon.awssdk.core.internal.metrics.RequestBodyMetrics;
 import software.amazon.awssdk.retries.api.RetryToken;
 
@@ -42,6 +43,15 @@ public final class InternalCoreExecutionAttribute extends SdkExecutionAttribute 
      */
     public static final ExecutionAttribute<RequestBodyMetrics> REQUEST_BODY_METRICS =
         new ExecutionAttribute<>("RequestBodyMetrics");
+
+    /**
+     * Per-attempt response handler override for hedging. When set, MakeAsyncHttpRequestStage uses this handler
+     * instead of the default one, enabling each hedge attempt to have its own isolated response handler.
+     * This prevents race conditions where concurrent attempts overwrite each other's state in a shared handler.
+     */
+    @SuppressWarnings("rawtypes")
+    public static final ExecutionAttribute<TransformingAsyncResponseHandler> HEDGING_RESPONSE_HANDLER =
+        new ExecutionAttribute<>("HedgingResponseHandler");
 
     private InternalCoreExecutionAttribute() {
     }

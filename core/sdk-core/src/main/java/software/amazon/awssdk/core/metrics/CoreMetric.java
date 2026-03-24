@@ -54,6 +54,15 @@ public final class CoreMetric {
         metric("RetryCount", Integer.class, MetricLevel.ERROR);
 
     /**
+     * The number of additional hedged attempts that the SDK started for the request when hedging is enabled. 0 implies the
+     * first attempt succeeded (or failed alone) and no other hedged attempts were started; 1 or more indicates that many
+     * additional hedged attempts were started (e.g. 1 = 2 attempts total, 2 = 3 attempts total). Aligns with
+     * {@link #RETRY_COUNT} semantics where 0 means no extra attempts. Only present when hedging was used for the request.
+     */
+    public static final SdkMetric<Integer> HEDGE_COUNT =
+        metric("HedgeCount", Integer.class, MetricLevel.ERROR);
+
+    /**
      * The endpoint for the service.
      */
     public static final SdkMetric<URI> SERVICE_ENDPOINT =

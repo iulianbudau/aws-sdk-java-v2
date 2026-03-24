@@ -54,15 +54,21 @@ public final class FutureCancelHandler extends ChannelInboundHandlerAdapter {
             LOG.warn(ctx.channel(), () -> String.format("Received a cancellation exception on a channel that doesn't have an "
                                                          + "execution Id attached. Exception's execution ID is %d. "
                                                          + "Exception is being ignored. Closing the channel",
-                                                         executionId(ctx)));
+                                                         cancelledException.getExecutionId()));
             ctx.close();
-            requestContext.channelPool().release(ctx.channel());
+            if (requestContext != null) {
+                requestContext.channelPool().release(ctx.channel());
+            }
         } else if (currentRequestCancelled(channelExecutionId, cancelledException)) {
             RequestContext requestContext = ctx.channel().attr(REQUEST_CONTEXT_KEY).get();
-            requestContext.handler().onError(e);
-            ctx.fireExceptionCaught(new IOException("Request cancelled"));
-            ctx.close();
-            requestContext.channelPool().release(ctx.channel());
+            if (requestContext != null) {
+                requestContext.handler().onError(e);
+                ctx.fireExceptionCaught(new IOException("Request cancelled"));
+                ctx.close();
+                requestContext.channelPool().release(ctx.channel());
+            } else {
+                ctx.close();
+            }
         } else {
             LOG.debug(ctx.channel(), () -> String.format("Received a cancellation exception but it did not match the current "
                                                          + "execution ID. Exception's execution ID is %d, but the current ID on "

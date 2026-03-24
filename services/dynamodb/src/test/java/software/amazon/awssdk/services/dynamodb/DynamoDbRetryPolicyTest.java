@@ -7,6 +7,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.core.SdkSystemSetting;
+import software.amazon.awssdk.core.client.config.HedgingConfig;
 import software.amazon.awssdk.core.client.config.SdkClientConfiguration;
 import software.amazon.awssdk.core.client.config.SdkClientOption;
 import software.amazon.awssdk.core.internal.retry.SdkDefaultRetryStrategy;
@@ -128,15 +129,20 @@ class DynamoDbRetryPolicyTest {
     }
 
     @Test
-    void defaultHedgingConfig_isEnabledWithExpectedDefaults() {
-        software.amazon.awssdk.core.client.config.HedgingConfig config =
+    void defaultHedgingConfig_hasExpectedDefaults() {
+        HedgingConfig config =
             DynamoDbRetryPolicy.defaultHedgingConfig();
-        assertThat(config.enabled()).isTrue();
-        assertThat(config.defaultDelay()).isEqualTo(Duration.ofMillis(7));
+        assertThat(config.enabled()).isFalse();
+        assertThat(config.defaultDelay()).isEqualTo(Duration.ofMillis(10));
         assertThat(config.maxHedgedAttempts()).isEqualTo(3);
-        assertThat(config.hedgeableOperations()).contains("GetItem", "BatchGetItem", "Query", "Scan");
+        assertThat(config.delayPerOperation()).containsOnlyKeys("GetItem");
+        assertThat(config.delayPerOperation().get("GetItem")).isEqualTo(Duration.ofMillis(8));
+        assertThat(config.hedgeableOperations()).containsExactlyInAnyOrder("GetItem", "Query", "Scan");
         assertThat(config.shouldHedge("GetItem")).isTrue();
+        assertThat(config.shouldHedge("Query")).isTrue();
+        assertThat(config.shouldHedge("Scan")).isTrue();
         assertThat(config.shouldHedge("PutItem")).isFalse();
+        assertThat(config.shouldHedge("BatchGetItem")).isFalse();
     }
 
 }

@@ -345,6 +345,8 @@
             <Class name="~software\.amazon\.awssdk\.auth\.credentials\.internal\.HttpCredentialsLoader" />
             <Class name="~software\.amazon\.awssdk\.auth\.credentials\.ContainerCredentialsProvider" />
             <Class name="~software\.amazon\.awssdk\.auth\.credentials\.InstanceProfileCredentialsProvider" />
+            <!-- HedgingStage is the synchronous hedging implementation, blocking is intentional -->
+            <Class name="~software\.amazon\.awssdk\.core\.internal\.http\.pipeline\.stages\.HedgingStage.*" />
 
             <!-- test modules are allowed to make blocking call as parts of their testing -->
             <Class name="~.*testutils.*" />

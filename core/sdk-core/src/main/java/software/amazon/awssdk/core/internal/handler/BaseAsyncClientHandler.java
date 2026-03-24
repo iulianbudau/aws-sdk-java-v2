@@ -77,7 +77,13 @@ public abstract class BaseAsyncClientHandler extends BaseClientHandler implement
             TransformingAsyncResponseHandler<Response<OutputT>> combinedResponseHandler =
                 createCombinedResponseHandler(executionParams, executionContext);
 
-            return doExecute(executionParams, executionContext, combinedResponseHandler);
+            // Create a factory for hedging that produces new isolated response handlers.
+            // Each hedge attempt needs its own handler to avoid race conditions on shared state
+            // (e.g., CombinedResponseAsyncHttpResponseHandler's headersFuture).
+            Supplier<TransformingAsyncResponseHandler<Response<OutputT>>> responseHandlerFactory =
+                () -> createCombinedResponseHandler(executionParams, executionContext);
+
+            return doExecute(executionParams, executionContext, combinedResponseHandler, responseHandlerFactory);
         });
     }
 
@@ -126,7 +132,8 @@ public abstract class BaseAsyncClientHandler extends BaseClientHandler implement
             TransformingAsyncResponseHandler<Response<ReturnT>> combinedResponseHandler =
                 new CombinedResponseAsyncHttpResponseHandler<>(wrappedAsyncStreamingResponseHandler, errorHandler);
 
-            return doExecute(executionParams, context, combinedResponseHandler);
+            // Streaming responses don't support hedging, so pass null factory
+            return doExecute(executionParams, context, combinedResponseHandler, null);
         });
     }
 
@@ -188,7 +195,8 @@ public abstract class BaseAsyncClientHandler extends BaseClientHandler implement
     private <InputT extends SdkRequest, OutputT extends SdkResponse, ReturnT> CompletableFuture<ReturnT> doExecute(
         ClientExecutionParams<InputT, OutputT> executionParams,
         ExecutionContext executionContext,
-        TransformingAsyncResponseHandler<Response<ReturnT>> asyncResponseHandler) {
+        TransformingAsyncResponseHandler<Response<ReturnT>> asyncResponseHandler,
+        Supplier<TransformingAsyncResponseHandler<Response<ReturnT>>> responseHandlerFactory) {
 
         try {
 
@@ -223,14 +231,26 @@ public abstract class BaseAsyncClientHandler extends BaseClientHandler implement
             }
 
             SdkClientConfiguration clientConfiguration = resolveRequestConfiguration(executionParams);
+
+            // Wrap the response handler for retry/hedging paths
+            TransformingAsyncResponseHandler<Response<ReturnT>> wrappedHandler =
+                new AsyncAfterTransmissionInterceptorCallingResponseHandler<>(asyncResponseHandler, executionContext);
+
+            // Create a factory that wraps each new handler the same way (for hedging)
+            Supplier<TransformingAsyncResponseHandler<Response<ReturnT>>> wrappedFactory = null;
+            if (responseHandlerFactory != null) {
+                wrappedFactory = () -> new AsyncAfterTransmissionInterceptorCallingResponseHandler<>(
+                    responseHandlerFactory.get(), executionContext);
+            }
+
             CompletableFuture<ReturnT> invokeFuture =
                 invoke(clientConfiguration,
                        marshalled,
                        finalizeSdkHttpRequestContext.asyncRequestBody().orElse(null),
                        inputT,
                        executionContext,
-                       new AsyncAfterTransmissionInterceptorCallingResponseHandler<>(asyncResponseHandler,
-                                                                                     executionContext));
+                       wrappedHandler,
+                       wrappedFactory);
 
             CompletableFuture<ReturnT> exceptionTranslatedFuture = invokeFuture.handle((resp, err) -> {
                 if (err != null) {
@@ -278,14 +298,20 @@ public abstract class BaseAsyncClientHandler extends BaseClientHandler implement
         AsyncRequestBody requestProvider,
         InputT originalRequest,
         ExecutionContext executionContext,
-        TransformingAsyncResponseHandler<Response<OutputT>> responseHandler) {
-        return client.requestExecutionBuilder()
+        TransformingAsyncResponseHandler<Response<OutputT>> responseHandler,
+        Supplier<TransformingAsyncResponseHandler<Response<OutputT>>> responseHandlerFactory) {
+
+        AmazonAsyncHttpClient.RequestExecutionBuilder builder = client.requestExecutionBuilder()
                      .requestProvider(requestProvider)
                      .request(request)
                      .originalRequest(originalRequest)
                      .executionContext(executionContext)
-                     .httpClientDependencies(c -> c.clientConfiguration(clientConfiguration))
-                     .execute(responseHandler);
+                     .httpClientDependencies(c -> c.clientConfiguration(clientConfiguration));
+
+        if (responseHandlerFactory != null) {
+            return builder.execute(responseHandler, responseHandlerFactory);
+        }
+        return builder.execute(responseHandler);
     }
 
     private <T> CompletableFuture<T> measureApiCallSuccess(ClientExecutionParams<?, ?> executionParams,

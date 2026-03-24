@@ -19,6 +19,7 @@ import static software.amazon.awssdk.core.internal.util.MetricUtils.collectHttpM
 import static software.amazon.awssdk.core.internal.util.MetricUtils.createAttemptMetricsCollector;
 
 import java.time.Duration;
+import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
 import software.amazon.awssdk.annotations.SdkInternalApi;
@@ -93,13 +94,23 @@ public final class AsyncApiCallAttemptMetricCollectionStage<OutputT> implements 
 
     private void reportReadMetrics(RequestExecutionContext context) {
         MetricCollector metricCollector = context.attemptMetricCollector();
-        long apiCallAttemptStartTime = MetricUtils.apiCallAttemptStartNanoTime(context).getAsLong();
+        OptionalLong apiCallAttemptStartOpt = MetricUtils.apiCallAttemptStartNanoTime(context);
+        if (!apiCallAttemptStartOpt.isPresent()) {
+            return;
+        }
+        long apiCallAttemptStartTime = apiCallAttemptStartOpt.getAsLong();
         long now = System.nanoTime();
         long ttlb = now - apiCallAttemptStartTime;
 
         metricCollector.reportMetric(CoreMetric.TIME_TO_LAST_BYTE, Duration.ofNanos(ttlb));
-        long responseReadStart = MetricUtils.responseHeadersReadEndNanoTime(context).getAsLong();
-        long responseBytesRead = MetricUtils.apiCallAttemptResponseBytesRead(context).getAsLong();
+
+        OptionalLong responseReadStartOpt = MetricUtils.responseHeadersReadEndNanoTime(context);
+        OptionalLong responseBytesReadOpt = MetricUtils.apiCallAttemptResponseBytesRead(context);
+        if (!responseReadStartOpt.isPresent() || !responseBytesReadOpt.isPresent()) {
+            return;
+        }
+        long responseReadStart = responseReadStartOpt.getAsLong();
+        long responseBytesRead = responseBytesReadOpt.getAsLong();
         double readThroughput = MetricUtils.bytesPerSec(responseBytesRead, responseReadStart, now);
         metricCollector.reportMetric(CoreMetric.READ_THROUGHPUT, readThroughput);
     }

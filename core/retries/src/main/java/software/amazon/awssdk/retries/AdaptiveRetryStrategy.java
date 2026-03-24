@@ -71,6 +71,7 @@ public interface AdaptiveRetryStrategy extends RetryStrategy {
                                               .tokenBucketMaxCapacity(DefaultRetryStrategy.Standard.TOKEN_BUCKET_SIZE)
                                               .build())
             .tokenBucketExceptionCost(DefaultRetryStrategy.Standard.DEFAULT_EXCEPTION_TOKEN_COST)
+            .tokenBucketHedgeTokenCost(DefaultRetryStrategy.Standard.DEFAULT_HEDGE_TOKEN_COST)
             .rateLimiterTokenBucketStore(RateLimiterTokenBucketStore.builder().build())
             .backoffStrategy(BackoffStrategy.exponentialDelay(DefaultRetryStrategy.Standard.BASE_DELAY,
                                                               DefaultRetryStrategy.Standard.MAX_BACKOFF))

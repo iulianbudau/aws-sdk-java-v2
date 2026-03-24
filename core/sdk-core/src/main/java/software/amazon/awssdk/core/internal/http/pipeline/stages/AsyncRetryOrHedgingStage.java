@@ -17,6 +17,7 @@ package software.amazon.awssdk.core.internal.http.pipeline.stages;
 
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Supplier;
 import software.amazon.awssdk.annotations.SdkInternalApi;
 import software.amazon.awssdk.core.Response;
 import software.amazon.awssdk.core.client.config.HedgingConfig;
@@ -27,6 +28,7 @@ import software.amazon.awssdk.core.internal.http.RequestExecutionContext;
 import software.amazon.awssdk.core.internal.http.TransformingAsyncResponseHandler;
 import software.amazon.awssdk.core.internal.http.pipeline.RequestPipeline;
 import software.amazon.awssdk.http.SdkHttpFullRequest;
+import software.amazon.awssdk.utils.Logger;
 
 /**
  * Orchestration stage that branches on resolved {@link HedgingConfig}: when hedging is enabled and
@@ -40,16 +42,28 @@ import software.amazon.awssdk.http.SdkHttpFullRequest;
 public final class AsyncRetryOrHedgingStage<OutputT> implements RequestPipeline<SdkHttpFullRequest,
     CompletableFuture<Response<OutputT>>> {
 
+    private static final Logger log = Logger.loggerFor(AsyncRetryOrHedgingStage.class);
+
     private final HttpClientDependencies dependencies;
     private final AsyncRetryableStage<OutputT> retryableStage;
     private final AsyncHedgingStage<OutputT> hedgingStage;
 
+    /**
+     * Creates a new AsyncRetryOrHedgingStage.
+     *
+     * @param responseHandler The response handler instance for the retry path (sequential execution)
+     * @param responseHandlerFactory Factory to create fresh response handlers for hedging (concurrent execution).
+     *                               Each hedge attempt gets its own isolated handler to prevent race conditions.
+     * @param dependencies HTTP client dependencies
+     * @param requestPipeline The downstream request pipeline
+     */
     public AsyncRetryOrHedgingStage(TransformingAsyncResponseHandler<Response<OutputT>> responseHandler,
+                                   Supplier<TransformingAsyncResponseHandler<Response<OutputT>>> responseHandlerFactory,
                                    HttpClientDependencies dependencies,
                                    RequestPipeline<SdkHttpFullRequest, CompletableFuture<Response<OutputT>>> requestPipeline) {
         this.dependencies = dependencies;
         this.retryableStage = new AsyncRetryableStage<>(responseHandler, dependencies, requestPipeline);
-        this.hedgingStage = new AsyncHedgingStage<>(dependencies, requestPipeline);
+        this.hedgingStage = new AsyncHedgingStage<>(responseHandlerFactory, dependencies, requestPipeline);
     }
 
     @Override
@@ -61,9 +75,15 @@ public final class AsyncRetryOrHedgingStage<OutputT> implements RequestPipeline<
             () -> Optional.empty());
         String operationName = context.executionAttributes().getAttribute(SdkExecutionAttribute.OPERATION_NAME);
 
-        if (!resolved.shouldHedge(operationName)) {
+        boolean shouldHedge = resolved.shouldHedge(operationName);
+        log.debug(() -> String.format("[HEDGE-ROUTING] operation=%s, enabled=%s, shouldHedge=%s, maxAttempts=%d",
+            operationName, resolved.enabled(), shouldHedge, resolved.maxHedgedAttempts()));
+        
+        if (!shouldHedge) {
+            log.debug(() -> "[HEDGE-ROUTING] Using RETRY path");
             return retryableStage.execute(request, context);
         }
+        log.debug(() -> "[HEDGE-ROUTING] Using HEDGING path");
         return hedgingStage.execute(request, context);
     }
 }

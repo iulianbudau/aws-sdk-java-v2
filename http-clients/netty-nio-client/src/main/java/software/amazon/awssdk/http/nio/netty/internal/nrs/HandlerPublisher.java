@@ -439,8 +439,13 @@ public class HandlerPublisher<T> extends ChannelDuplexHandler implements Publish
         switch (state) {
             case NO_SUBSCRIBER:
             case BUFFERING:
-                buffer.add(COMPLETE);
-                state = HandlerPublisher.State.DRAINING;
+                if (!hasSubscriber.get()) {
+                    cleanup();
+                    state = HandlerPublisher.State.DONE;
+                } else {
+                    buffer.add(COMPLETE);
+                    state = HandlerPublisher.State.DRAINING;
+                }
                 break;
             case DEMANDING:
             case IDLE:
@@ -470,7 +475,9 @@ public class HandlerPublisher<T> extends ChannelDuplexHandler implements Publish
             case DRAINING:
                 state = HandlerPublisher.State.DONE;
                 cleanup();
-                subscriber.onError(cause);
+                if (hasSubscriber.get()) {
+                    subscriber.onError(cause);
+                }
                 break;
             default:
                 // Ignore

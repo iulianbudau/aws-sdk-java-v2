@@ -112,7 +112,7 @@ public class AsyncRetryOrHedgingStageIntegrationTest {
             .clientConfiguration(config)
             .build();
 
-        stage = new AsyncRetryOrHedgingStage<>(responseHandler, dependencies, requestPipeline);
+        stage = new AsyncRetryOrHedgingStage<>(responseHandler, () -> responseHandler, dependencies, requestPipeline);
 
         request = SdkHttpFullRequest.builder()
             .method(SdkHttpMethod.GET)
@@ -171,7 +171,7 @@ public class AsyncRetryOrHedgingStageIntegrationTest {
             .clientConfiguration(config)
             .build();
 
-        stage = new AsyncRetryOrHedgingStage<>(responseHandler, dependencies, requestPipeline);
+        stage = new AsyncRetryOrHedgingStage<>(responseHandler, () -> responseHandler, dependencies, requestPipeline);
 
         Response<String> successResponse = Response.<String>builder()
             .httpResponse(SdkHttpResponse.builder().statusCode(200).build())
@@ -208,7 +208,7 @@ public class AsyncRetryOrHedgingStageIntegrationTest {
             .clientConfiguration(clientConfig)
             .build();
 
-        stage = new AsyncRetryOrHedgingStage<>(responseHandler, dependencies, requestPipeline);
+        stage = new AsyncRetryOrHedgingStage<>(responseHandler, () -> responseHandler, dependencies, requestPipeline);
 
         ExecutionAttributes attrs = new ExecutionAttributes();
         attrs.putAttribute(SdkExecutionAttribute.OPERATION_NAME, "PutItem"); // Not hedgeable
@@ -263,7 +263,7 @@ public class AsyncRetryOrHedgingStageIntegrationTest {
             .clientConfiguration(sdkConfig)
             .build();
 
-        stage = new AsyncRetryOrHedgingStage<>(responseHandler, dependencies, requestPipeline);
+        stage = new AsyncRetryOrHedgingStage<>(responseHandler, () -> responseHandler, dependencies, requestPipeline);
 
         context = RequestExecutionContext.builder()
             .originalRequest(NoopTestRequest.builder().overrideConfiguration(SdkRequestOverrideConfiguration.builder()

@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletionException;
+import java.util.function.Predicate;
 import software.amazon.awssdk.annotations.SdkInternalApi;
 import software.amazon.awssdk.core.Response;
 import software.amazon.awssdk.core.SdkStandardLogger;
@@ -48,6 +49,7 @@ import software.amazon.awssdk.retries.api.RefreshRetryTokenResponse;
 import software.amazon.awssdk.retries.api.RetryStrategy;
 import software.amazon.awssdk.retries.api.RetryToken;
 import software.amazon.awssdk.retries.api.TokenAcquisitionFailedException;
+import software.amazon.awssdk.retries.internal.BaseRetryStrategy;
 
 /**
  * Contains the logic shared by {@link RetryableStage} and {@link AsyncRetryableStage} when querying and interacting with a
@@ -114,32 +116,30 @@ public final class RetryableStageHelper {
 
     /**
      * Notify the retry strategy that the request attempt succeeded.
+     * This is used by the retry path (RetryableStage, AsyncRetryableStage).
+     * Reports RETRY_COUNT metric and releases tokens back to the bucket.
      */
     public void recordAttemptSucceeded() {
-        recordAttemptSucceededWithHedgeCount(null);
-    }
-
-    /**
-     * Notify the retry strategy that the request attempt succeeded, with an optional hedged attempt count
-     * (for use when hedging: release N units so net consumption is zero).
-     *
-     * @param hedgedAttemptsStarted when non-null, the number of hedged attempts started for this logical request
-     */
-    public void recordAttemptSucceededWithHedgeCount(Integer hedgedAttemptsStarted) {
         RetryToken retryToken = context.executionAttributes().getAttribute(RETRY_TOKEN);
-        recordSuccessWithTokenAndHedgeCount(retryToken, hedgedAttemptsStarted);
-    }
-
-    /**
-     * Notify the retry strategy that the request attempt succeeded with the given token and hedged count.
-     * Used when the winning attempt's context is not this helper's context (e.g. hedging).
-     */
-    public void recordSuccessWithTokenAndHedgeCount(RetryToken token, Integer hedgedAttemptsStarted) {
-        RecordSuccessRequest recordSuccessRequest = hedgedAttemptsStarted != null
-                ? RecordSuccessRequest.create(token, hedgedAttemptsStarted)
-                : RecordSuccessRequest.create(token);
+        RecordSuccessRequest recordSuccessRequest = RecordSuccessRequest.create(retryToken);
         retryStrategy().recordSuccess(recordSuccessRequest);
         context.executionContext().metricCollector().reportMetric(RETRY_COUNT, retriesAttemptedSoFar());
+    }
+    
+    /**
+     * Notify the retry strategy that a hedged request succeeded with the given token.
+     * This is used by the hedging path (HedgingStage, AsyncHedgingStage).
+     * Releases tokens back to the bucket but does NOT report RETRY_COUNT since hedging 
+     * uses parallel attempts (not sequential retries).
+     * 
+     * <p>Hedging has its own metric (HEDGE_COUNT) which is reported separately by the hedging stages.
+     * 
+     * @param token The retry token from the winning attempt
+     * @param hedgedAttemptsStarted The number of hedge attempts started (for token release calculation)
+     */
+    public void recordSuccessForHedging(RetryToken token, int hedgedAttemptsStarted) {
+        RecordSuccessRequest recordSuccessRequest = RecordSuccessRequest.create(token, hedgedAttemptsStarted);
+        retryStrategy().recordSuccess(recordSuccessRequest);
     }
 
     /**
@@ -280,6 +280,35 @@ public final class RetryableStageHelper {
      */
     private int retriesAttemptedSoFar() {
         return Math.max(0, attemptNumber - 1);
+    }
+
+    /**
+     * Check if the given exception is retryable according to the retry strategy's predicates.
+     * This method provides consistent retryability checks between retry and hedging paths.
+     *
+     * <p>The check evaluates the exception against all configured retry predicates. If any
+     * predicate matches (returns true), the exception is considered retryable.
+     *
+     * @param exception The exception to check for retryability
+     * @return true if the exception is retryable according to the strategy predicates
+     */
+    public boolean isRetryableByPredicates(Throwable exception) {
+        RetryStrategy strategy = retryStrategy();
+        if (strategy instanceof BaseRetryStrategy) {
+            BaseRetryStrategy baseStrategy = (BaseRetryStrategy) strategy;
+            List<Predicate<Throwable>> predicates = baseStrategy.retryPredicates();
+            for (Predicate<Throwable> predicate : predicates) {
+                if (predicate.test(exception)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        // Fallback for non-BaseRetryStrategy implementations: use SdkException.retryable()
+        if (exception instanceof SdkException) {
+            return ((SdkException) exception).retryable();
+        }
+        return false;
     }
 
     /**

@@ -22,6 +22,7 @@ import static software.amazon.awssdk.http.Header.CONTENT_LENGTH;
 import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
@@ -87,6 +88,20 @@ public final class MakeAsyncHttpRequestStage<OutputT>
         this.timeoutExecutor = dependencies.clientConfiguration().option(SdkClientOption.SCHEDULED_EXECUTOR_SERVICE);
     }
 
+    /**
+     * Resolves the response handler to use for this request. If a per-attempt handler override is set
+     * (used by hedging for isolation), returns that handler. Otherwise returns the default handler.
+     */
+    @SuppressWarnings("unchecked")
+    private TransformingAsyncResponseHandler<Response<OutputT>> resolveResponseHandler(RequestExecutionContext context) {
+        TransformingAsyncResponseHandler<?> hedgingHandler = 
+            context.executionAttributes().getAttribute(InternalCoreExecutionAttribute.HEDGING_RESPONSE_HANDLER);
+        if (hedgingHandler != null) {
+            return (TransformingAsyncResponseHandler<Response<OutputT>>) hedgingHandler;
+        }
+        return responseHandler;
+    }
+
     @Override
     public CompletableFuture<Response<OutputT>> execute(CompletableFuture<SdkHttpFullRequest> requestFuture,
                                                         RequestExecutionContext context) {
@@ -130,7 +145,9 @@ public final class MakeAsyncHttpRequestStage<OutputT>
 
         CompletableFuture<Response<OutputT>> responseFuture = new CompletableFuture<>();
 
-        CompletableFuture<Response<OutputT>> responseHandlerFuture = responseHandler.prepare();
+        // Check for per-attempt handler override (used by hedging for isolation)
+        TransformingAsyncResponseHandler<Response<OutputT>> effectiveHandler = resolveResponseHandler(context);
+        CompletableFuture<Response<OutputT>> responseHandlerFuture = effectiveHandler.prepare();
 
         SdkHttpContentPublisher basePublisher = context.requestProvider() == null
                                                   ? new SimpleHttpContentPublisher(request)
@@ -152,7 +169,7 @@ public final class MakeAsyncHttpRequestStage<OutputT>
                        .getAttribute(SDK_HTTP_EXECUTION_ATTRIBUTES));
         }
 
-        CompletableFuture<Void> httpClientFuture = doExecuteHttpRequest(context, executeRequestBuilder, responseHandler);
+        CompletableFuture<Void> httpClientFuture = doExecuteHttpRequest(context, executeRequestBuilder, effectiveHandler);
 
         TimeoutTracker timeoutTracker = setupAttemptTimer(responseFuture, context);
         context.apiCallAttemptTimeoutTracker(timeoutTracker);
@@ -329,12 +346,17 @@ public final class MakeAsyncHttpRequestStage<OutputT>
 
         @Override
         public void onHeaders(SdkHttpResponse headers) {
-            long startTime = MetricUtils.apiCallAttemptStartNanoTime(context).getAsLong();
+            OptionalLong startTimeOpt = MetricUtils.apiCallAttemptStartNanoTime(context);
             long now = System.nanoTime();
             context.executionAttributes().putAttribute(SdkInternalExecutionAttribute.HEADERS_READ_END_NANO_TIME, now);
 
-            long d = now - startTime;
-            context.attemptMetricCollector().reportMetric(CoreMetric.TIME_TO_FIRST_BYTE, Duration.ofNanos(d));
+            if (startTimeOpt.isPresent()) {
+                long d = now - startTimeOpt.getAsLong();
+                MetricCollector attemptCollector = context.attemptMetricCollector();
+                if (attemptCollector != null) {
+                    attemptCollector.reportMetric(CoreMetric.TIME_TO_FIRST_BYTE, Duration.ofNanos(d));
+                }
+            }
             super.onHeaders(headers);
         }
 
