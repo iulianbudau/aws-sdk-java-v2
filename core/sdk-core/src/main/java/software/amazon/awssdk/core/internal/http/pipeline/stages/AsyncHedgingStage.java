@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -51,8 +52,6 @@ import software.amazon.awssdk.core.internal.http.pipeline.stages.utils.HedgingSt
 import software.amazon.awssdk.core.internal.http.pipeline.stages.utils.RetryableStageHelper;
 import software.amazon.awssdk.http.SdkHttpFullRequest;
 import software.amazon.awssdk.metrics.MetricCollector;
-import software.amazon.awssdk.retries.api.AcquireHedgeTokenRequest;
-import software.amazon.awssdk.retries.api.RecordSuccessRequest;
 import software.amazon.awssdk.retries.api.RetryStrategy;
 import software.amazon.awssdk.retries.api.RetryToken;
 import software.amazon.awssdk.retries.api.TokenAcquisitionFailedException;
@@ -123,6 +122,7 @@ public final class AsyncHedgingStage<OutputT> implements RequestPipeline<SdkHttp
         // Budget tracking: totalBudget = maxHedgedAttempts, consumed increments on each attempt completion/skip
         private final AtomicInteger totalBudget = new AtomicInteger(0);
         private final AtomicInteger consumedBudget = new AtomicInteger(0);
+        private final AtomicInteger acquiredHedgeFailureCapacity = new AtomicInteger(0);
         
         // Track actual attempts started (only those that acquired tokens and began execution)
         private final AtomicInteger attemptsStarted = new AtomicInteger(0);
@@ -134,10 +134,12 @@ public final class AsyncHedgingStage<OutputT> implements RequestPipeline<SdkHttp
         // Track all attempt futures for cancellation
         private final List<CompletableFuture<?>> attemptFutures = new ArrayList<>();
         private final Object futuresLock = new Object();
+        private final java.util.Set<Integer> debitedFailureAttempts = ConcurrentHashMap.newKeySet();
         
         // Track scheduled futures for cancellation
         private final List<ScheduledFuture<?>> scheduledFutures = new ArrayList<>();
         private final Object scheduledLock = new Object();
+        private final AtomicBoolean hedgeAdmissionClosed = new AtomicBoolean(false);
         
         // Ensure hedge count is only reported once (same pattern as sync HedgingStage)
         private final AtomicBoolean hedgeCountReported = new AtomicBoolean(false);
@@ -222,23 +224,19 @@ public final class AsyncHedgingStage<OutputT> implements RequestPipeline<SdkHttp
                             return;
                         }
                         
-                        // Acquire token NOW (just-in-time)
-                        log.debug(() -> String.format("[HEDGE] Attempt %d - acquiring hedge token", attemptIndex));
-                        RetryToken tokenK = acquireHedgeToken(initialToken, attemptIndex, delay);
-                        if (tokenK == null) {
-                            // Token acquisition failed (circuit breaker denied)
-                            log.debug(() -> String.format("[HEDGE] Attempt %d - token acquisition FAILED", attemptIndex));
+                        if (!canStartAdditionalHedge(initialToken)) {
+                            log.debug(() -> String.format("[HEDGE] Attempt %d - hedge admission DENIED", attemptIndex));
                             consumeBudgetAndCheckExhaustion();
                             return;
                         }
-                        log.debug(() -> String.format("[HEDGE] Attempt %d - token acquired, starting attempt", attemptIndex));
+                        log.debug(() -> String.format("[HEDGE] Attempt %d - admission passed, starting attempt", attemptIndex));
                         
                         try {
-                            startAttempt(attemptIndex, tokenK);
+                            startAttempt(attemptIndex, initialToken);
                         } catch (Throwable t) {
                             log.debug(() -> String.format("[HEDGE] Attempt %d - startAttempt EXCEPTION: %s", 
                                 attemptIndex, t.getMessage()), t);
-                            handleAttemptFailure(t, attemptIndex, tokenK);
+                            handleAttemptFailure(t, attemptIndex, initialToken);
                         }
                     }, delayMs, MILLISECONDS);
                     
@@ -342,7 +340,7 @@ public final class AsyncHedgingStage<OutputT> implements RequestPipeline<SdkHttp
             
             if (response != null) {
                 // Non-success response (error)
-                handleUnsuccessfulResponse(response, attemptIndex);
+                handleUnsuccessfulResponse(response, attemptIndex, token);
                 return;
             }
             
@@ -364,11 +362,12 @@ public final class AsyncHedgingStage<OutputT> implements RequestPipeline<SdkHttp
                 tryCompleteWithFailure(sdkEx);
                 return;
             }
-            
+
+            recordHedgeFailureIfNeeded(token, sdkEx, attemptIndex);
             consumeBudgetAndCheckExhaustion();
         }
 
-        private void handleUnsuccessfulResponse(Response<OutputT> response, int attemptIndex) {
+        private void handleUnsuccessfulResponse(Response<OutputT> response, int attemptIndex, RetryToken token) {
             helperForAttempt1.setLastResponse(response.httpResponse());
             helperForAttempt1.adjustClockIfClockSkew(response);
             
@@ -380,6 +379,7 @@ public final class AsyncHedgingStage<OutputT> implements RequestPipeline<SdkHttp
                     tryCompleteWithFailure(sdkEx);
                     return;
                 }
+                recordHedgeFailureIfNeeded(token, sdkEx, attemptIndex);
             }
             
             consumeBudgetAndCheckExhaustion();
@@ -408,7 +408,7 @@ public final class AsyncHedgingStage<OutputT> implements RequestPipeline<SdkHttp
                         // Use recordSuccessForHedging to release tokens WITHOUT reporting RETRY_COUNT.
                         // Hedging uses parallel attempts, not sequential retries, so RETRY_COUNT is not applicable.
                         // HEDGE_COUNT is already reported by reportHedgeCount() above.
-                        helperForAttempt1.recordSuccessForHedging(token, attemptsStarted.get());
+                        helperForAttempt1.recordSuccessForHedging(token, acquiredHedgeFailureCapacity.get());
                     }
                 } catch (Exception e) {
                     log.debug(() -> "Failed to report metrics or release tokens", e);
@@ -439,7 +439,6 @@ public final class AsyncHedgingStage<OutputT> implements RequestPipeline<SdkHttp
             if (state.compareAndSet(HedgingExecutionState.RUNNING, HedgingExecutionState.COMPLETING)) {
                 cancelAllOtherAttempts();
                 reportHedgeCount();
-                releaseHedgeTokensOnFailure();
                 
                 userFuture.completeExceptionally(failure);
                 state.set(HedgingExecutionState.COMPLETED);
@@ -453,7 +452,6 @@ public final class AsyncHedgingStage<OutputT> implements RequestPipeline<SdkHttp
             if (state.compareAndSet(HedgingExecutionState.RUNNING, HedgingExecutionState.COMPLETING)) {
                 cancelAllOtherAttempts();
                 reportHedgeCount();
-                releaseHedgeTokensOnFailure();
                 
                 List<Throwable> allFailures = getFailures();
                 Throwable primary = allFailures.isEmpty()
@@ -489,23 +487,6 @@ public final class AsyncHedgingStage<OutputT> implements RequestPipeline<SdkHttp
             return state.get() == HedgingExecutionState.RUNNING;
         }
 
-        private RetryToken acquireHedgeToken(RetryToken initialToken, int attemptIndex, Duration delay) {
-            if (retryStrategy == null || !retryStrategy.supportsHedging()) {
-                return initialToken;
-            }
-            try {
-                AcquireHedgeTokenRequest hedgeRequest = AcquireHedgeTokenRequest.builder()
-                    .token(initialToken)
-                    .attemptIndex(attemptIndex)
-                    .operationName(operationName)
-                    .delayUntilThisAttempt(delay)
-                    .build();
-                return retryStrategy.acquireTokenForHedgeAttempt(hedgeRequest).token();
-            } catch (TokenAcquisitionFailedException e) {
-                return null;
-            }
-        }
-
         private void cancelAllOtherAttempts() {
             // Cancel all attempt futures
             List<CompletableFuture<?>> futuresToCancel;
@@ -526,22 +507,41 @@ public final class AsyncHedgingStage<OutputT> implements RequestPipeline<SdkHttp
             }
         }
 
-        private void releaseHedgeTokensOnFailure() {
-            if (retryStrategy == null) {
-                return;
+        private boolean canStartAdditionalHedge(RetryToken token) {
+            if (hedgeAdmissionClosed.get()) {
+                return false;
             }
-            int started = attemptsStarted.get();
-            if (started <= 1) {
-                return;
+            if (retryStrategy == null || !retryStrategy.supportsHedging()) {
+                return isRunning();
             }
-            RetryToken initialToken = context.executionAttributes().getAttribute(RETRY_TOKEN);
-            if (initialToken != null) {
-                try {
-                    RecordSuccessRequest request = RecordSuccessRequest.create(initialToken, started);
-                    retryStrategy.recordSuccess(request);
-                } catch (Exception e) {
-                    log.debug(() -> "Failed to release hedge tokens on failure", e);
+            try {
+                if (!helperForAttempt1.canStartHedgeAttempt(token)) {
+                    hedgeAdmissionClosed.set(true);
+                    return false;
                 }
+                return isRunning();
+            } catch (RuntimeException e) {
+                log.debug(() -> "Failed to evaluate hedge admission; closing additional hedge starts", e);
+                hedgeAdmissionClosed.set(true);
+                return false;
+            }
+        }
+
+        private void recordHedgeFailureIfNeeded(RetryToken token, Throwable failure, int attemptIndex) {
+            if (token == null || retryStrategy == null || !retryStrategy.supportsHedging()) {
+                return;
+            }
+            if (!debitedFailureAttempts.add(attemptIndex)) {
+                return;
+            }
+            try {
+                int acquired = helperForAttempt1.recordHedgeFailure(token, failure);
+                acquiredHedgeFailureCapacity.addAndGet(acquired);
+            } catch (TokenAcquisitionFailedException e) {
+                hedgeAdmissionClosed.set(true);
+            } catch (RuntimeException e) {
+                debitedFailureAttempts.remove(attemptIndex);
+                throw e;
             }
         }
 

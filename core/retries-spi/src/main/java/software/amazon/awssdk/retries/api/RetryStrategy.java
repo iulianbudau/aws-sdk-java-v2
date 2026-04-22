@@ -80,30 +80,37 @@ public interface RetryStrategy {
     RecordSuccessResponse recordSuccess(RecordSuccessRequest request);
 
     /**
-     * Invoked before starting a hedged attempt (attempt 2, 3, ΓÇª) when hedging is enabled.
+     * Returns whether this strategy supports hedging-specific admission/debit operations.
      *
-     * <p>Default implementation throws {@link UnsupportedOperationException}. Strategies that support
-     * hedging (e.g. token bucket / circuit breaker for hedged attempts) should override this method.
-     * When not supported, the hedging stage may still run hedged attempts but will not call the
-     * token bucket for attempts 2..N.
-     *
-     * @param request the hedge token request (token, attempt index, delay)
-     * @return response with new token and delay until this attempt
-     * @throws UnsupportedOperationException if this strategy does not support hedge token acquisition
-     * @throws TokenAcquisitionFailedException if a token cannot be acquired
-     */
-    default AcquireHedgeTokenResponse acquireTokenForHedgeAttempt(AcquireHedgeTokenRequest request) {
-        throw new UnsupportedOperationException("This retry strategy does not support hedging token acquisition");
-    }
-
-    /**
-     * Returns whether this strategy supports acquiring tokens for hedged attempts.
-     *
-     * <p>Default returns false. Override to return true when {@link #acquireTokenForHedgeAttempt}
-     * is implemented.
+     * <p>Default returns false.
      */
     default boolean supportsHedging() {
         return false;
+    }
+
+    /**
+     * Invoked before starting an additional hedged attempt (attempt 2, 3, ...) to determine whether
+     * the strategy currently allows launching more hedge attempts.
+     *
+     * <p>This check must be read-only and should not mutate strategy state.
+     *
+     * @param token token acquired for this logical request scope
+     * @return true when a hedge attempt can be launched, false otherwise
+     */
+    default boolean canStartHedgeAttempt(RetryToken token) {
+        return true;
+    }
+
+    /**
+     * Invoked when a hedged attempt encounters a retryable logical failure. Implementations should
+     * update circuit-breaker/token-bucket state using the same semantics as retry failures.
+     *
+     * @param token token acquired for this logical request scope
+     * @param failure retryable logical failure
+     * @throws TokenAcquisitionFailedException if failure cost cannot be charged
+     */
+    default int recordHedgeFailure(RetryToken token, Throwable failure) {
+        return 0;
     }
 
     /**

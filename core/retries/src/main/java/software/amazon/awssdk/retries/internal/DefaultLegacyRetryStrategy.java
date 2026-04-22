@@ -47,6 +47,17 @@ public final class DefaultLegacyRetryStrategy
     }
 
     @Override
+    protected int exceptionCost(Throwable failure) {
+        if (circuitBreakerEnabled) {
+            if (failure != null && treatAsThrottling.test(failure)) {
+                return throttlingExceptionCost;
+            }
+            return exceptionCost;
+        }
+        return 0;
+    }
+
+    @Override
     public Builder toBuilder() {
         return new Builder(this);
     }
@@ -104,11 +115,6 @@ public final class DefaultLegacyRetryStrategy
 
         public Builder tokenBucketExceptionCost(int exceptionCost) {
             setTokenBucketExceptionCost(exceptionCost);
-            return this;
-        }
-
-        public Builder tokenBucketHedgeTokenCost(int hedgeTokenCost) {
-            setTokenBucketHedgeTokenCost(hedgeTokenCost);
             return this;
         }
 

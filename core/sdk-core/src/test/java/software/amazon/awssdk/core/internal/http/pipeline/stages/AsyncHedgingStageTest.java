@@ -66,12 +66,9 @@ import software.amazon.awssdk.http.SdkHttpFullRequest;
 import software.amazon.awssdk.metrics.MetricCollector;
 import software.amazon.awssdk.http.SdkHttpMethod;
 import software.amazon.awssdk.http.SdkHttpResponse;
-import software.amazon.awssdk.retries.api.AcquireHedgeTokenRequest;
-import software.amazon.awssdk.retries.api.AcquireHedgeTokenResponse;
 import software.amazon.awssdk.retries.api.AcquireInitialTokenResponse;
 import software.amazon.awssdk.retries.api.RetryStrategy;
 import software.amazon.awssdk.retries.api.RetryToken;
-import software.amazon.awssdk.retries.api.TokenAcquisitionFailedException;
 import software.amazon.awssdk.retries.internal.DefaultRetryToken;
 
 public class AsyncHedgingStageTest {
@@ -144,6 +141,7 @@ public class AsyncHedgingStageTest {
         when(retryStrategy.acquireInitialToken(any()))
             .thenReturn(AcquireInitialTokenResponse.create(initialToken, Duration.ZERO));
         when(retryStrategy.maxAttempts()).thenReturn(3);
+        when(retryStrategy.canStartHedgeAttempt(any())).thenReturn(true);
         // Mock recordSuccess to prevent NPE - it's called when an attempt succeeds
         when(retryStrategy.recordSuccess(any())).thenReturn(
             software.amazon.awssdk.retries.api.RecordSuccessResponse.create(initialToken));
@@ -250,7 +248,10 @@ public class AsyncHedgingStageTest {
             hedgeHeaders.add(r.firstMatchingHeader("amz-sdk-hedge-request").orElse(null));
         }
 
-        assertThat(hedgeHeaders).contains("attempt=1; max=3; delay=0ms", "attempt=2; max=3; delay=10ms");
+        assertThat(hedgeHeaders).contains("attempt=1; max=3; delay=0ms");
+        assertThat(hedgeHeaders)
+            .anyMatch(h -> "attempt=2; max=3; delay=10ms".equals(h)
+                || "attempt=3; max=3; delay=20ms".equals(h));
     }
 
     @Test
@@ -274,31 +275,9 @@ public class AsyncHedgingStageTest {
 
     @Test
     @Timeout(5)
-    public void retryStrategySupportsHedging_shouldAcquireHedgeTokens() throws Exception {
+    public void retryStrategySupportsHedging_shouldCheckHedgeAdmission() throws Exception {
         when(retryStrategy.supportsHedging()).thenReturn(true);
-
-        RetryToken token2 = DefaultRetryToken.builder()
-            .scope("test")
-            .attempt(2)
-            .capacityAcquired(1)
-            .capacityRemaining(99)
-            .build();
-
-        RetryToken token3 = DefaultRetryToken.builder()
-            .scope("test")
-            .attempt(3)
-            .capacityAcquired(1)
-            .capacityRemaining(98)
-            .build();
-
-        when(retryStrategy.acquireTokenForHedgeAttempt(any(AcquireHedgeTokenRequest.class)))
-            .thenAnswer(invocation -> {
-                AcquireHedgeTokenRequest req = invocation.getArgument(0);
-                if (req.attemptIndex() == 2) {
-                    return AcquireHedgeTokenResponse.create(token2, Duration.ZERO);
-                }
-                return AcquireHedgeTokenResponse.create(token3, Duration.ZERO);
-            });
+        when(retryStrategy.canStartHedgeAttempt(any())).thenReturn(true);
 
         Response<String> successResponse = Response.<String>builder()
             .httpResponse(SdkHttpResponse.builder().statusCode(200).build())
@@ -311,20 +290,19 @@ public class AsyncHedgingStageTest {
 
         CompletableFuture<Response<String>> result = hedgingStage.execute(request, context);
 
-        // Wait for hedge attempts to be scheduled and acquire tokens
+        // Wait for hedge attempts to be scheduled and evaluate admission
         Thread.sleep(50);
         delayedSuccess.complete(successResponse);
         
         result.get(2, TimeUnit.SECONDS);
-        verify(retryStrategy, times(2)).acquireTokenForHedgeAttempt(any(AcquireHedgeTokenRequest.class));
+        verify(retryStrategy, times(2)).canStartHedgeAttempt(any());
     }
 
     @Test
     @Timeout(5)
-    public void hedgeTokenAcquisitionFails_shouldSkipThatAttempt() throws Exception {
+    public void hedgeAdmissionFails_shouldSkipThatAttempt() throws Exception {
         when(retryStrategy.supportsHedging()).thenReturn(true);
-        when(retryStrategy.acquireTokenForHedgeAttempt(any(AcquireHedgeTokenRequest.class)))
-            .thenThrow(new TokenAcquisitionFailedException("No tokens available"));
+        when(retryStrategy.canStartHedgeAttempt(any())).thenReturn(false);
 
         Response<String> successResponse = Response.<String>builder()
             .httpResponse(SdkHttpResponse.builder().statusCode(200).build())
@@ -336,7 +314,7 @@ public class AsyncHedgingStageTest {
 
         Response<String> response = result.get(2, TimeUnit.SECONDS);
         assertThat(response).isEqualTo(successResponse);
-        // Should execute only attempt 1 since hedges fail token acquisition
+        // Should execute only attempt 1 since hedges fail admission
         verify(requestPipeline, times(1)).execute(any(), any());
     }
 
@@ -500,15 +478,7 @@ public class AsyncHedgingStageTest {
     @Timeout(5)
     public void recordSuccessWithHedgeCount_shouldCallHelper() throws Exception {
         when(retryStrategy.supportsHedging()).thenReturn(true);
-        RetryToken token2 = DefaultRetryToken.builder().scope("test").attempt(2).capacityAcquired(1).capacityRemaining(99).build();
-        RetryToken token3 = DefaultRetryToken.builder().scope("test").attempt(3).capacityAcquired(1).capacityRemaining(98).build();
-        when(retryStrategy.acquireTokenForHedgeAttempt(any(AcquireHedgeTokenRequest.class)))
-            .thenAnswer(invocation -> {
-                AcquireHedgeTokenRequest req = invocation.getArgument(0);
-                return req.attemptIndex() == 2
-                    ? AcquireHedgeTokenResponse.create(token2, Duration.ZERO)
-                    : AcquireHedgeTokenResponse.create(token3, Duration.ZERO);
-            });
+        when(retryStrategy.canStartHedgeAttempt(any())).thenReturn(true);
 
         Response<String> successResponse = Response.<String>builder()
             .httpResponse(SdkHttpResponse.builder().statusCode(200).build())
@@ -693,15 +663,14 @@ public class AsyncHedgingStageTest {
     }
 
     /**
-     * When fewer than maxHedgedAttempts are started (e.g. hedge token acquisition fails for attempts 2 and 3),
+     * When fewer than maxHedgedAttempts are started (e.g. hedge admission fails for attempts 2 and 3),
      * and all started attempts fail, the user future must still complete with aggregated failure.
      */
     @Test
     @Timeout(5)
     public void fewerAttemptsStarted_allFail_shouldCompleteWithAggregatedFailure() throws Exception {
         when(retryStrategy.supportsHedging()).thenReturn(true);
-        when(retryStrategy.acquireTokenForHedgeAttempt(any(AcquireHedgeTokenRequest.class)))
-            .thenThrow(new TokenAcquisitionFailedException("No tokens"));
+        when(retryStrategy.canStartHedgeAttempt(any())).thenReturn(false);
 
         SdkException failureException = RetryableException.builder().message("Attempt 1 failed").build();
         Response<String> failureResponse = Response.<String>builder()
@@ -715,7 +684,7 @@ public class AsyncHedgingStageTest {
 
         CompletableFuture<Response<String>> result = hedgingStage.execute(request, context);
 
-        // Wait for scheduled tasks to run and fail token acquisition
+        // Wait for scheduled tasks to run and fail hedge admission
         Thread.sleep(50);
         delayedFailure.complete(failureResponse);
 

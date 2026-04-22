@@ -24,8 +24,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
 import software.amazon.awssdk.annotations.SdkInternalApi;
-import software.amazon.awssdk.retries.api.AcquireHedgeTokenRequest;
-import software.amazon.awssdk.retries.api.AcquireHedgeTokenResponse;
 import software.amazon.awssdk.retries.api.AcquireInitialTokenRequest;
 import software.amazon.awssdk.retries.api.AcquireInitialTokenResponse;
 import software.amazon.awssdk.retries.api.BackoffStrategy;
@@ -36,7 +34,6 @@ import software.amazon.awssdk.retries.api.RefreshRetryTokenResponse;
 import software.amazon.awssdk.retries.api.RetryStrategy;
 import software.amazon.awssdk.retries.api.RetryToken;
 import software.amazon.awssdk.retries.api.TokenAcquisitionFailedException;
-import software.amazon.awssdk.retries.api.internal.AcquireHedgeTokenResponseImpl;
 import software.amazon.awssdk.retries.api.internal.RefreshRetryTokenResponseImpl;
 import software.amazon.awssdk.retries.internal.circuitbreaker.AcquireResponse;
 import software.amazon.awssdk.retries.internal.circuitbreaker.ReleaseResponse;
@@ -61,7 +58,6 @@ public abstract class BaseRetryStrategy implements DefaultAwareRetryStrategy {
     protected final BackoffStrategy throttlingBackoffStrategy;
     protected final Predicate<Throwable> treatAsThrottling;
     protected final int exceptionCost;
-    protected final int hedgeTokenCost;
     protected final TokenBucketStore tokenBucketStore;
     protected final Set<String> defaultsAdded;
     protected final boolean useClientDefaults;
@@ -76,7 +72,6 @@ public abstract class BaseRetryStrategy implements DefaultAwareRetryStrategy {
         this.throttlingBackoffStrategy = Validate.paramNotNull(builder.throttlingBackoffStrategy, "throttlingBackoffStrategy");
         this.treatAsThrottling = Validate.paramNotNull(builder.treatAsThrottling, "treatAsThrottling");
         this.exceptionCost = Validate.paramNotNull(builder.exceptionCost, "exceptionCost");
-        this.hedgeTokenCost = builder.hedgeTokenCost != null ? builder.hedgeTokenCost : 1;
         this.tokenBucketStore = Validate.paramNotNull(builder.tokenBucketStore, "tokenBucketStore");
         this.defaultsAdded = Collections.unmodifiableSet(
             Validate.paramNotNull(new HashSet<>(builder.defaultsAdded), "defaultsAdded"));
@@ -135,7 +130,7 @@ public abstract class BaseRetryStrategy implements DefaultAwareRetryStrategy {
     public final RecordSuccessResponse recordSuccess(RecordSuccessRequest request) {
         DefaultRetryToken token = asDefaultRetryToken(request.token());
 
-        // Update the circuit breaker token bucket (release N when hedging succeeded).
+        // Update the circuit breaker token bucket (success replenishes capacity).
         ReleaseResponse releaseResponse = releaseTokenBucketCapacity(token, request.hedgedAttemptsStarted());
 
         // Refresh the retry token and return.
@@ -149,43 +144,36 @@ public abstract class BaseRetryStrategy implements DefaultAwareRetryStrategy {
         return RecordSuccessResponse.create(refreshedToken);
     }
 
-    /**
-     * This method implements the logic of {@link RetryStrategy#acquireTokenForHedgeAttempt(AcquireHedgeTokenRequest)}.
-     *
-     * @see RetryStrategy#acquireTokenForHedgeAttempt(AcquireHedgeTokenRequest)
-     */
-    @Override
-    public AcquireHedgeTokenResponse acquireTokenForHedgeAttempt(AcquireHedgeTokenRequest request) {
-        DefaultRetryToken token = asDefaultRetryToken(request.token());
-        TokenBucket tokenBucket = tokenBucketStore.tokenBucketForScope(token.scope());
-        int cost = circuitBreakerEnabled ? hedgeTokenCost : 0;
-        AcquireResponse acquireResponse = tokenBucket.tryAcquire(cost);
-
-        if (acquireResponse.acquisitionFailed()) {
-            DefaultRetryToken refreshedToken = token.toBuilder()
-                    .capacityRemaining(acquireResponse.capacityRemaining())
-                    .capacityAcquired(acquireResponse.capacityAcquired())
-                    .state(DefaultRetryToken.TokenState.TOKEN_ACQUISITION_FAILED)
-                    .build();
-            throw new TokenAcquisitionFailedException(
-                String.format("Hedge attempt %d token acquisition failed (cost: %d, capacity: %d/%d).",
-                    request.attemptIndex(), cost, acquireResponse.capacityRemaining(), acquireResponse.maxCapacity()),
-                refreshedToken, null);
-        }
-
-        DefaultRetryToken hedgeToken = DefaultRetryToken.builder()
-                .scope(token.scope())
-                .attempt(request.attemptIndex())
-                .state(DefaultRetryToken.TokenState.IN_PROGRESS)
-                .capacityAcquired(acquireResponse.capacityAcquired())
-                .capacityRemaining(acquireResponse.capacityRemaining())
-                .build();
-        return AcquireHedgeTokenResponseImpl.create(hedgeToken, request.delayUntilThisAttempt());
-    }
-
     @Override
     public boolean supportsHedging() {
         return true;
+    }
+
+    @Override
+    public boolean canStartHedgeAttempt(RetryToken token) {
+        DefaultRetryToken defaultToken = asDefaultRetryToken(token);
+        TokenBucket tokenBucket = tokenBucketStore.tokenBucketForScope(defaultToken.scope());
+        int requiredCapacity = exceptionCost((Throwable) null);
+        return tokenBucket.currentCapacity() >= requiredCapacity;
+    }
+
+    @Override
+    public int recordHedgeFailure(RetryToken token, Throwable failure) {
+        DefaultRetryToken defaultToken = asDefaultRetryToken(token);
+        TokenBucket tokenBucket = tokenBucketStore.tokenBucketForScope(defaultToken.scope());
+        int cost = exceptionCost(failure);
+        AcquireResponse acquireResponse = tokenBucket.tryAcquire(cost);
+        if (acquireResponse.acquisitionFailed()) {
+            DefaultRetryToken refreshedToken =
+                defaultToken.toBuilder()
+                            .capacityRemaining(acquireResponse.capacityRemaining())
+                            .capacityAcquired(acquireResponse.capacityAcquired())
+                            .state(DefaultRetryToken.TokenState.TOKEN_ACQUISITION_FAILED)
+                            .addFailure(failure)
+                            .build();
+            throw new TokenAcquisitionFailedException(acquisitionFailedMessage(acquireResponse), refreshedToken, failure);
+        }
+        return acquireResponse.capacityAcquired();
     }
 
     @Override
@@ -245,6 +233,13 @@ public abstract class BaseRetryStrategy implements DefaultAwareRetryStrategy {
         return 0;
     }
 
+    protected int exceptionCost(Throwable failure) {
+        if (circuitBreakerEnabled) {
+            return exceptionCost;
+        }
+        return 0;
+    }
+
     /**
      * Returns true if there are retry predicates configured for this retry strategy.
      *
@@ -274,22 +269,10 @@ public abstract class BaseRetryStrategy implements DefaultAwareRetryStrategy {
         return tokenBucket.tryAcquire(exceptionCost(request));
     }
 
-    private ReleaseResponse releaseTokenBucketCapacity(DefaultRetryToken token) {
-        return releaseTokenBucketCapacity(token, Optional.empty());
-    }
-
     private ReleaseResponse releaseTokenBucketCapacity(DefaultRetryToken token,
                                                        Optional<Integer> hedgedAttemptsStarted) {
         TokenBucket bucket = tokenBucketStore.tokenBucketForScope(token.scope());
-        int capacityReleased;
-        if (hedgedAttemptsStarted.isPresent()) {
-            // Release (N-1)*hedgeTokenCost for hedged attempts 2..N; at least 1 for replenishment.
-            int n = hedgedAttemptsStarted.get();
-            int cost = circuitBreakerEnabled ? hedgeTokenCost : 0;
-            capacityReleased = Math.max((n - 1) * cost, 1);
-        } else {
-            capacityReleased = Math.max(token.capacityAcquired(), 1);
-        }
+        int capacityReleased = Math.max(hedgedAttemptsStarted.orElse(token.capacityAcquired()), 1);
         return bucket.release(capacityReleased);
     }
 
@@ -450,7 +433,6 @@ public abstract class BaseRetryStrategy implements DefaultAwareRetryStrategy {
                        .add("throttlingBackoffStrategy", throttlingBackoffStrategy)
                        .add("treatAsThrottling", treatAsThrottling)
                        .add("exceptionCost", exceptionCost)
-                       .add("hedgeTokenCost", hedgeTokenCost)
                        .add("tokenBucketStore", tokenBucketStore)
                        .add("defaultsAdded", defaultsAdded)
                        .add("useClientDefaults", useClientDefaults)
@@ -465,7 +447,6 @@ public abstract class BaseRetryStrategy implements DefaultAwareRetryStrategy {
         private Boolean circuitBreakerEnabled;
         private Boolean useClientDefaults;
         private Integer exceptionCost;
-        private Integer hedgeTokenCost;
         private BackoffStrategy backoffStrategy;
         private BackoffStrategy throttlingBackoffStrategy;
         private Predicate<Throwable> treatAsThrottling = throwable -> false;
@@ -481,7 +462,6 @@ public abstract class BaseRetryStrategy implements DefaultAwareRetryStrategy {
             this.maxAttempts = strategy.maxAttempts;
             this.circuitBreakerEnabled = strategy.circuitBreakerEnabled;
             this.exceptionCost = strategy.exceptionCost;
-            this.hedgeTokenCost = strategy.hedgeTokenCost;
             this.backoffStrategy = strategy.backoffStrategy;
             this.throttlingBackoffStrategy = strategy.throttlingBackoffStrategy;
             this.treatAsThrottling = strategy.treatAsThrottling;
@@ -520,10 +500,6 @@ public abstract class BaseRetryStrategy implements DefaultAwareRetryStrategy {
 
         void setTokenBucketExceptionCost(int exceptionCost) {
             this.exceptionCost = exceptionCost;
-        }
-
-        void setTokenBucketHedgeTokenCost(int hedgeTokenCost) {
-            this.hedgeTokenCost = hedgeTokenCost;
         }
 
         void setUseClientDefaults(Boolean useClientDefaults) {

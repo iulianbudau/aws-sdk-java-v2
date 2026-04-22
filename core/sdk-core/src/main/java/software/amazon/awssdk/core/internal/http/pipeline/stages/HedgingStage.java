@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
@@ -48,8 +49,6 @@ import software.amazon.awssdk.core.internal.http.pipeline.RequestToResponsePipel
 import software.amazon.awssdk.core.internal.http.pipeline.stages.utils.HedgingStageHelper;
 import software.amazon.awssdk.core.internal.http.pipeline.stages.utils.RetryableStageHelper;
 import software.amazon.awssdk.http.SdkHttpFullRequest;
-import software.amazon.awssdk.retries.api.AcquireHedgeTokenRequest;
-import software.amazon.awssdk.retries.api.RecordSuccessRequest;
 import software.amazon.awssdk.retries.api.RetryStrategy;
 import software.amazon.awssdk.retries.api.RetryToken;
 import software.amazon.awssdk.retries.api.TokenAcquisitionFailedException;
@@ -99,6 +98,8 @@ public final class HedgingStage<OutputT> implements RequestToResponsePipeline<Ou
             new AtomicReference<>(HedgingExecutionState.RUNNING);
         private final AtomicInteger totalBudget = new AtomicInteger(0);
         private final AtomicInteger consumedBudget = new AtomicInteger(0);
+        private final AtomicInteger acquiredHedgeFailureCapacity = new AtomicInteger(0);
+        private final AtomicBoolean hedgeAdmissionClosed = new AtomicBoolean(false);
 
         private HedgingExecutor(SdkHttpFullRequest request, RequestExecutionContext context) {
             this.request = request;
@@ -187,38 +188,20 @@ public final class HedgingStage<OutputT> implements RequestToResponsePipeline<Ou
                             consumeBudgetAndCheckExhaustion();
                             return;
                         }
-                        RetryToken tokenK = acquireHedgeToken(initialToken, attemptIndex, delay);
-                        if (tokenK == null) {
+                        if (!canStartAdditionalHedge(initialToken)) {
                             consumeBudgetAndCheckExhaustion();
                             return;
                         }
                         try {
-                            startHedgedAttempt(attemptIndex, tokenK, delayMs);
+                            startHedgedAttempt(attemptIndex, initialToken, delayMs);
                         } catch (Throwable t) {
-                            handleCompletion(null, t, attemptIndex, tokenK);
+                            handleCompletion(null, t, attemptIndex, initialToken);
                         }
                     }, delayMs, MILLISECONDS);
                     state.addScheduledFuture(scheduled);
                 } catch (RejectedExecutionException e) {
                     consumeBudgetAndCheckExhaustion();
                 }
-            }
-        }
-
-        private RetryToken acquireHedgeToken(RetryToken initialToken, int attemptIndex, Duration delay) {
-            if (retryStrategy == null || !retryStrategy.supportsHedging()) {
-                return initialToken;
-            }
-            try {
-                AcquireHedgeTokenRequest hedgeRequest = AcquireHedgeTokenRequest.builder()
-                    .token(initialToken)
-                    .attemptIndex(attemptIndex)
-                    .operationName(operationName)
-                    .delayUntilThisAttempt(delay)
-                    .build();
-                return retryStrategy.acquireTokenForHedgeAttempt(hedgeRequest).token();
-            } catch (TokenAcquisitionFailedException e) {
-                return null;
             }
         }
 
@@ -254,7 +237,7 @@ public final class HedgingStage<OutputT> implements RequestToResponsePipeline<Ou
                         consumeBudgetAndCheckExhaustion();
                         return;
                     }
-                    handleFailure(exception, attemptIndex);
+                    handleFailure(exception, attemptIndex, token);
                     return;
                 }
                 if (response != null && response.isSuccess()) {
@@ -262,7 +245,7 @@ public final class HedgingStage<OutputT> implements RequestToResponsePipeline<Ou
                     return;
                 }
                 if (response != null) {
-                    handleUnsuccessfulResponse(response);
+                    handleUnsuccessfulResponse(response, attemptIndex, token);
                     return;
                 }
                 state.addFailure(
@@ -274,7 +257,7 @@ public final class HedgingStage<OutputT> implements RequestToResponsePipeline<Ou
             }
         }
 
-        private void handleFailure(Throwable exception, int attemptIndex) {
+        private void handleFailure(Throwable exception, int attemptIndex, RetryToken token) {
             Throwable cause = exception instanceof RuntimeException && exception.getCause() != null
                 ? exception.getCause() : exception;
             SdkException sdkEx = cause instanceof SdkException ? (SdkException) cause
@@ -284,6 +267,7 @@ public final class HedgingStage<OutputT> implements RequestToResponsePipeline<Ou
                 tryCompleteWithFailure(sdkEx);
                 return;
             }
+            recordHedgeFailureIfNeeded(token, sdkEx, attemptIndex);
             consumeBudgetAndCheckExhaustion();
         }
 
@@ -291,7 +275,7 @@ public final class HedgingStage<OutputT> implements RequestToResponsePipeline<Ou
             if (executionState.compareAndSet(HedgingExecutionState.RUNNING, HedgingExecutionState.COMPLETING)) {
                 reportHedgeCountOnce();
                 if (retryStrategy != null && token != null) {
-                    helperForAttempt1.recordSuccessForHedging(token, state.attemptsStarted());
+                    helperForAttempt1.recordSuccessForHedging(token, acquiredHedgeFailureCapacity.get());
                 }
                 state.cancelAllAttempts();
                 userFuture.complete(response);
@@ -305,13 +289,12 @@ public final class HedgingStage<OutputT> implements RequestToResponsePipeline<Ou
             if (executionState.compareAndSet(HedgingExecutionState.RUNNING, HedgingExecutionState.COMPLETING)) {
                 state.cancelAllAttempts();
                 reportHedgeCountOnce();
-                releaseHedgeTokensOnFailure();
                 userFuture.completeExceptionally(failure);
                 executionState.set(HedgingExecutionState.COMPLETED);
             }
         }
 
-        private void handleUnsuccessfulResponse(Response<OutputT> response) {
+        private void handleUnsuccessfulResponse(Response<OutputT> response, int attemptIndex, RetryToken token) {
             helperForAttempt1.setLastResponse(response.httpResponse());
             helperForAttempt1.adjustClockIfClockSkew(response);
             SdkException sdkEx = response.exception();
@@ -320,6 +303,7 @@ public final class HedgingStage<OutputT> implements RequestToResponsePipeline<Ou
                 tryCompleteWithFailure(sdkEx);
                 return;
             }
+            recordHedgeFailureIfNeeded(token, sdkEx, attemptIndex);
             consumeBudgetAndCheckExhaustion();
         }
 
@@ -336,13 +320,50 @@ public final class HedgingStage<OutputT> implements RequestToResponsePipeline<Ou
             return cause != null && cause instanceof CancellationException;
         }
 
+        private boolean canStartAdditionalHedge(RetryToken token) {
+            if (hedgeAdmissionClosed.get()) {
+                return false;
+            }
+            if (retryStrategy == null || !retryStrategy.supportsHedging()) {
+                return isRunning();
+            }
+            try {
+                if (!helperForAttempt1.canStartHedgeAttempt(token)) {
+                    hedgeAdmissionClosed.set(true);
+                    return false;
+                }
+                return isRunning();
+            } catch (RuntimeException e) {
+                log.debug(() -> "Failed to evaluate hedge admission; closing additional hedge starts", e);
+                hedgeAdmissionClosed.set(true);
+                return false;
+            }
+        }
+
+        private void recordHedgeFailureIfNeeded(RetryToken token, Throwable failure, int attemptIndex) {
+            if (token == null || retryStrategy == null || !retryStrategy.supportsHedging()) {
+                return;
+            }
+            if (!state.markFailureDebited(attemptIndex)) {
+                return;
+            }
+            try {
+                int acquired = helperForAttempt1.recordHedgeFailure(token, failure);
+                acquiredHedgeFailureCapacity.addAndGet(acquired);
+            } catch (TokenAcquisitionFailedException e) {
+                hedgeAdmissionClosed.set(true);
+            } catch (RuntimeException e) {
+                state.unmarkFailureDebited(attemptIndex);
+                throw e;
+            }
+        }
+
         private void completeWithAggregatedFailure() {
             if (!executionState.compareAndSet(HedgingExecutionState.RUNNING, HedgingExecutionState.COMPLETING)) {
                 return;
             }
             state.cancelAllAttempts();
             reportHedgeCountOnce();
-            releaseHedgeTokensOnFailure();
             List<Throwable> failures = state.failures();
             Throwable primary = failures.isEmpty()
                 ? new IllegalStateException("All hedged attempts failed with no exception")
@@ -361,32 +382,6 @@ public final class HedgingStage<OutputT> implements RequestToResponsePipeline<Ou
                 userFuture.completeExceptionally(primary);
             }
             executionState.set(HedgingExecutionState.COMPLETED);
-        }
-
-        private void releaseHedgeTokensOnFailure() {
-            if (retryStrategy == null) {
-                return;
-            }
-            int attemptsStarted = state.attemptsStarted();
-            if (attemptsStarted <= 1) {
-                // No hedge attempts were started, nothing to release
-                return;
-            }
-            // Use the initial token to release hedge tokens. The recordSuccess method with hedgedAttemptsStarted
-            // will release (N-1)*exceptionCost tokens back to the bucket.
-            // Note: We call recordSuccess even on failure to release tokens - this is correct because
-            // the token bucket should not penalize us for hedge attempts that were cancelled/failed.
-            RetryToken initialToken = context.executionAttributes().getAttribute(RETRY_TOKEN);
-            if (initialToken != null) {
-                try {
-                    // Call recordSuccess directly on retryStrategy to release tokens without reporting metrics
-                    RecordSuccessRequest request = RecordSuccessRequest.create(initialToken, attemptsStarted);
-                    retryStrategy.recordSuccess(request);
-                } catch (Exception e) {
-                    // Ignore any exception during token release - this is best-effort cleanup
-                    log.debug(() -> "Failed to release hedge tokens on failure", e);
-                }
-            }
         }
 
         private void reportHedgeCountOnce() {
@@ -441,6 +436,7 @@ public final class HedgingStage<OutputT> implements RequestToResponsePipeline<Ou
         private final List<Throwable> failures;
         private final Object failuresLock;
         private final int maxHedgedAttempts;
+        private final java.util.Set<Integer> debitedFailureAttempts;
 
         HedgingState(int maxHedgedAttempts) {
             this.attemptFutures = new ArrayList<>(maxHedgedAttempts);
@@ -449,6 +445,7 @@ public final class HedgingStage<OutputT> implements RequestToResponsePipeline<Ou
             this.failures = new ArrayList<>();
             this.failuresLock = new Object();
             this.maxHedgedAttempts = maxHedgedAttempts;
+            this.debitedFailureAttempts = ConcurrentHashMap.newKeySet();
         }
 
         void incrementAttemptsStarted() {
@@ -500,6 +497,14 @@ public final class HedgingStage<OutputT> implements RequestToResponsePipeline<Ou
 
         int maxHedgedAttempts() {
             return maxHedgedAttempts;
+        }
+
+        boolean markFailureDebited(int attemptIndex) {
+            return debitedFailureAttempts.add(attemptIndex);
+        }
+
+        void unmarkFailureDebited(int attemptIndex) {
+            debitedFailureAttempts.remove(attemptIndex);
         }
     }
 }

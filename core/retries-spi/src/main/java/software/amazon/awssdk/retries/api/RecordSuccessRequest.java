@@ -28,15 +28,15 @@ import software.amazon.awssdk.retries.api.internal.RecordSuccessRequestImpl;
 @ThreadSafe
 public interface RecordSuccessRequest {
     /**
-     * A {@link RetryToken} acquired a previous {@link RetryStrategy#acquireInitialToken},
-     * {@link RetryStrategy#refreshRetryToken}, or {@link RetryStrategy#acquireTokenForHedgeAttempt} call.
+     * A {@link RetryToken} acquired a previous {@link RetryStrategy#acquireInitialToken}
+     * or {@link RetryStrategy#refreshRetryToken} call.
      */
     RetryToken token();
 
     /**
-     * When present, the number of hedged attempts that were started for this logical request.
-     * The strategy should release this many units so that net token consumption for a successful
-     * hedged request is zero. When empty, behavior is unchanged (release based on token capacity).
+     * When present, the amount of hedge failure capacity acquired for this logical request.
+     * The strategy should use this value as the source of truth for success release accounting
+     * in hedged execution.
      */
     Optional<Integer> hedgedAttemptsStarted();
 
@@ -48,8 +48,7 @@ public interface RecordSuccessRequest {
     }
 
     /**
-     * Creates a new {@link RecordSuccessRequest} with the given token and hedged attempt count
-     * (for use when hedging succeeded and the strategy should release N units).
+     * Creates a new {@link RecordSuccessRequest} with the given token and hedging-acquired capacity.
      */
     static RecordSuccessRequest create(RetryToken token, int hedgedAttemptsStarted) {
         return RecordSuccessRequestImpl.create(token, hedgedAttemptsStarted);

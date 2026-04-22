@@ -129,11 +129,6 @@ public final class DefaultAdaptiveRetryStrategy
             return this;
         }
 
-        public Builder tokenBucketHedgeTokenCost(int hedgeTokenCost) {
-            setTokenBucketHedgeTokenCost(hedgeTokenCost);
-            return this;
-        }
-
         public Builder rateLimiterTokenBucketStore(RateLimiterTokenBucketStore rateLimiterTokenBucketStore) {
             this.rateLimiterTokenBucketStore = rateLimiterTokenBucketStore;
             return this;

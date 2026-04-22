@@ -137,9 +137,17 @@ public final class RetryableStageHelper {
      * @param token The retry token from the winning attempt
      * @param hedgedAttemptsStarted The number of hedge attempts started (for token release calculation)
      */
-    public void recordSuccessForHedging(RetryToken token, int hedgedAttemptsStarted) {
-        RecordSuccessRequest recordSuccessRequest = RecordSuccessRequest.create(token, hedgedAttemptsStarted);
+    public void recordSuccessForHedging(RetryToken token, int hedgingAcquiredCapacity) {
+        RecordSuccessRequest recordSuccessRequest = RecordSuccessRequest.create(token, hedgingAcquiredCapacity);
         retryStrategy().recordSuccess(recordSuccessRequest);
+    }
+
+    public boolean canStartHedgeAttempt(RetryToken token) {
+        return retryStrategy().canStartHedgeAttempt(token);
+    }
+
+    public int recordHedgeFailure(RetryToken token, Throwable failure) {
+        return retryStrategy().recordHedgeFailure(token, failure);
     }
 
     /**

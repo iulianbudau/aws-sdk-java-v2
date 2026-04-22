@@ -92,7 +92,6 @@ public final class DefaultRetryStrategy {
         static final Duration MAX_BACKOFF = Duration.ofSeconds(20);
         static final int TOKEN_BUCKET_SIZE = 500;
         static final int DEFAULT_EXCEPTION_TOKEN_COST = 5;
-        static final int DEFAULT_HEDGE_TOKEN_COST = 1;
 
         private Standard() {
         }
@@ -113,7 +112,6 @@ public final class DefaultRetryStrategy {
         static final Duration MAX_BACKOFF = Duration.ofSeconds(20);
         static final int TOKEN_BUCKET_SIZE = 500;
         static final int DEFAULT_EXCEPTION_TOKEN_COST = 5;
-        static final int DEFAULT_HEDGE_TOKEN_COST = 1;
         static final int THROTTLE_EXCEPTION_TOKEN_COST = 0;
 
         private Legacy() {
