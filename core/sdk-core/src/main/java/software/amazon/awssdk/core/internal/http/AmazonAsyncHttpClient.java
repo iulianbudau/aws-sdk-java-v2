@@ -27,6 +27,7 @@ import software.amazon.awssdk.core.Response;
 import software.amazon.awssdk.core.SdkRequest;
 import software.amazon.awssdk.core.async.AsyncRequestBody;
 import software.amazon.awssdk.core.client.config.SdkClientConfiguration;
+import software.amazon.awssdk.core.client.config.SdkClientOption;
 import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.core.http.ExecutionContext;
 import software.amazon.awssdk.core.internal.http.pipeline.RequestPipelineBuilder;
@@ -49,6 +50,7 @@ import software.amazon.awssdk.core.internal.http.pipeline.stages.MergeCustomHead
 import software.amazon.awssdk.core.internal.http.pipeline.stages.MergeCustomQueryParamsStage;
 import software.amazon.awssdk.core.internal.http.pipeline.stages.QueryParametersToBodyStage;
 import software.amazon.awssdk.core.internal.http.pipeline.stages.UnwrapResponseContainer;
+import software.amazon.awssdk.core.internal.http.pipeline.stages.utils.HedgingLatencyTracker;
 import software.amazon.awssdk.core.internal.util.ThrowableUtils;
 import software.amazon.awssdk.http.SdkHttpFullRequest;
 import software.amazon.awssdk.utils.SdkAutoCloseable;
@@ -60,8 +62,12 @@ public final class AmazonAsyncHttpClient implements SdkAutoCloseable {
     private final HttpClientDependencies httpClientDependencies;
 
     public AmazonAsyncHttpClient(SdkClientConfiguration clientConfiguration) {
+        SdkClientConfiguration runtimeConfig = clientConfiguration.toBuilder()
+                                                                  .lazyOptionIfAbsent(SdkClientOption.HEDGING_LATENCY_TRACKER,
+                                                                                      c -> new HedgingLatencyTracker())
+                                                                  .build();
         this.httpClientDependencies = HttpClientDependencies.builder()
-                                                            .clientConfiguration(clientConfiguration)
+                                                            .clientConfiguration(runtimeConfig)
                                                             .build();
     }
 

@@ -76,8 +76,9 @@ public final class AsyncRetryOrHedgingStage<OutputT> implements RequestPipeline<
         String operationName = context.executionAttributes().getAttribute(SdkExecutionAttribute.OPERATION_NAME);
 
         boolean shouldHedge = resolved.shouldHedge(operationName);
+        int maxAttempts = resolved.policyForOperation(operationName).maxHedgedAttempts();
         log.debug(() -> String.format("[HEDGE-ROUTING] operation=%s, enabled=%s, shouldHedge=%s, maxAttempts=%d",
-            operationName, resolved.enabled(), shouldHedge, resolved.maxHedgedAttempts()));
+            operationName, resolved.enabled(), shouldHedge, maxAttempts));
         
         if (!shouldHedge) {
             log.debug(() -> "[HEDGE-ROUTING] Using RETRY path");

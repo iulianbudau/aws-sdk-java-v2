@@ -324,7 +324,8 @@ public final class ClientOverrideConfiguration
     }
 
     /**
-     * The optional hedging configuration for request hedging (multiple attempts at fixed delays, first success wins).
+     * The optional hedging configuration for request hedging
+     * (multiple attempts using fixed or adaptive delay strategies, first success wins).
      *
      * @see Builder#hedgingConfig(HedgingConfig)
      */
@@ -553,7 +554,7 @@ public final class ClientOverrideConfiguration
         Consumer<RetryStrategy.Builder<?, ?>> retryStrategyConfigurator();
 
         /**
-         * Configure hedging for requests (multiple attempts at fixed delays, first success wins).
+         * Configure hedging for requests (multiple attempts using fixed or adaptive delay strategies, first success wins).
          *
          * @see ClientOverrideConfiguration#hedgingConfig()
          * @see HedgingConfig

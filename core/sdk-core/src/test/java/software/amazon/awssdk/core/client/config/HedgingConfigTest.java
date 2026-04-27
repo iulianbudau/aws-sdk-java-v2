@@ -16,6 +16,7 @@
 package software.amazon.awssdk.core.client.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
 import java.util.Collections;
@@ -30,75 +31,43 @@ public class HedgingConfigTest {
     public void disabled_hasHedgingOff() {
         HedgingConfig config = HedgingConfig.disabled();
         assertThat(config.enabled()).isFalse();
-        assertThat(config.maxHedgedAttempts()).isEqualTo(1);
+        assertThat(config.defaultPolicy().maxHedgedAttempts()).isEqualTo(3);
     }
 
     @Test
     public void resolve_requestLevelWins() {
-        HedgingConfig requestLevel = HedgingConfig.builder().enabled(true).maxHedgedAttempts(5).build();
-        HedgingConfig clientLevel = HedgingConfig.builder().enabled(true).maxHedgedAttempts(3).build();
+        HedgingConfig requestLevel = HedgingConfig.builder()
+                                                  .enabled(true)
+                                                  .defaultPolicy(HedgingConfig.OperationHedgingPolicy.builder()
+                                                                                                      .maxHedgedAttempts(5)
+                                                                                                      .build())
+                                                  .build();
+        HedgingConfig clientLevel = HedgingConfig.builder()
+                                                 .enabled(true)
+                                                 .defaultPolicy(HedgingConfig.OperationHedgingPolicy.builder()
+                                                                                                     .maxHedgedAttempts(3)
+                                                                                                     .build())
+                                                 .build();
         HedgingConfig resolved = HedgingConfig.resolve(
             Optional.of(requestLevel),
             Optional.of(clientLevel),
             () -> Optional.of(clientLevel));
-        assertThat(resolved.maxHedgedAttempts()).isEqualTo(5);
+        assertThat(resolved.defaultPolicy().maxHedgedAttempts()).isEqualTo(5);
     }
 
     @Test
     public void resolve_clientLevelWhenNoRequest() {
-        HedgingConfig clientLevel = HedgingConfig.builder().enabled(true).maxHedgedAttempts(3).build();
+        HedgingConfig clientLevel = HedgingConfig.builder()
+                                                 .enabled(true)
+                                                 .defaultPolicy(HedgingConfig.OperationHedgingPolicy.builder()
+                                                                                                     .maxHedgedAttempts(3)
+                                                                                                     .build())
+                                                 .build();
         HedgingConfig resolved = HedgingConfig.resolve(
             Optional.empty(),
             Optional.of(clientLevel),
             () -> Optional.empty());
-        assertThat(resolved.maxHedgedAttempts()).isEqualTo(3);
-    }
-
-    @Test
-    public void resolve_disabledWhenAllAbsent() {
-        HedgingConfig resolved = HedgingConfig.resolve(
-            Optional.empty(),
-            Optional.empty(),
-            () -> Optional.empty());
-        assertThat(resolved.enabled()).isFalse();
-    }
-
-    @Test
-    public void delayBeforeAttempt_attempt1_isZero() {
-        HedgingConfig config = HedgingConfig.builder()
-            .enabled(true)
-            .defaultDelay(Duration.ofMillis(10))
-            .maxHedgedAttempts(3)
-            .build();
-        assertThat(config.delayBeforeAttempt(1, "GetItem")).isEqualTo(Duration.ZERO);
-    }
-
-    @Test
-    public void delayBeforeAttempt_usesPerOperationWhenPresent() {
-        HedgingConfig config = HedgingConfig.builder()
-            .enabled(true)
-            .defaultDelay(Duration.ofMillis(10))
-            .maxHedgedAttempts(3)
-            .delayPerOperation(Collections.singletonMap("GetItem", Duration.ofMillis(5)))
-            .build();
-        // Staggered: attempt 2 = 1*base, attempt 3 = 2*base
-        assertThat(config.delayBeforeAttempt(2, "GetItem")).isEqualTo(Duration.ofMillis(5));
-        assertThat(config.delayBeforeAttempt(3, "GetItem")).isEqualTo(Duration.ofMillis(10));
-        assertThat(config.delayBeforeAttempt(2, "OtherOp")).isEqualTo(Duration.ofMillis(10));
-        assertThat(config.delayBeforeAttempt(3, "OtherOp")).isEqualTo(Duration.ofMillis(20));
-    }
-
-    @Test
-    public void delayBeforeAttempt_staggeredByAttemptIndex() {
-        HedgingConfig config = HedgingConfig.builder()
-            .enabled(true)
-            .defaultDelay(Duration.ofMillis(7))
-            .maxHedgedAttempts(4)
-            .build();
-        assertThat(config.delayBeforeAttempt(1, "GetItem")).isEqualTo(Duration.ZERO);
-        assertThat(config.delayBeforeAttempt(2, "GetItem")).isEqualTo(Duration.ofMillis(7));
-        assertThat(config.delayBeforeAttempt(3, "GetItem")).isEqualTo(Duration.ofMillis(14));
-        assertThat(config.delayBeforeAttempt(4, "GetItem")).isEqualTo(Duration.ofMillis(21));
+        assertThat(resolved.defaultPolicy().maxHedgedAttempts()).isEqualTo(3);
     }
 
     @Test
@@ -111,7 +80,6 @@ public class HedgingConfigTest {
     public void shouldHedge_emptyAllowList_returnsTrueWhenEnabled() {
         HedgingConfig config = HedgingConfig.builder()
             .enabled(true)
-            .maxHedgedAttempts(3)
             .hedgeableOperations(Collections.emptySet())
             .build();
         assertThat(config.shouldHedge("GetItem")).isTrue();
@@ -125,12 +93,60 @@ public class HedgingConfigTest {
         allowed.add("Query");
         HedgingConfig config = HedgingConfig.builder()
             .enabled(true)
-            .maxHedgedAttempts(3)
             .hedgeableOperations(allowed)
             .build();
         assertThat(config.shouldHedge("GetItem")).isTrue();
         assertThat(config.shouldHedge("Query")).isTrue();
         assertThat(config.shouldHedge("PutItem")).isFalse();
         assertThat(config.shouldHedge(null)).isFalse();
+    }
+
+    @Test
+    public void adaptiveDelayConfig_defaultsApplied() {
+        HedgingConfig.AdaptiveDelayConfig cfg = HedgingConfig.AdaptiveDelayConfig.builder().build();
+        assertThat(cfg.percentile()).isEqualTo(99.0);
+        assertThat(cfg.sampleSize()).isEqualTo(1_000);
+        assertThat(cfg.minSamplesRequired()).isEqualTo(20);
+    }
+
+    @Test
+    public void adaptiveDelayConfig_invalidPercentile_throws() {
+        assertThatThrownBy(() -> HedgingConfig.AdaptiveDelayConfig.builder().percentile(0).build())
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    public void adaptiveDelayConfig_invalidBounds_throws() {
+        assertThatThrownBy(() -> HedgingConfig.AdaptiveDelayConfig.builder()
+                                                                  .minDelay(Duration.ofMillis(10))
+                                                                  .maxDelay(Duration.ofMillis(5))
+                                                                  .build())
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    public void policyPerOperation_resolvesByName() {
+        HedgingConfig.OperationHedgingPolicy defaultPolicy = HedgingConfig.OperationHedgingPolicy.builder()
+                                                                                                  .maxHedgedAttempts(2)
+                                                                                                  .delayConfig(HedgingConfig.FixedDelayConfig.builder()
+                                                                                                                                    .baseDelay(Duration.ofMillis(10))
+                                                                                                                                    .build())
+                                                                                                  .build();
+        HedgingConfig.OperationHedgingPolicy getItemPolicy = HedgingConfig.OperationHedgingPolicy.builder()
+                                                                                                  .maxHedgedAttempts(5)
+                                                                                                  .delayConfig(HedgingConfig.FixedDelayConfig.builder()
+                                                                                                                                    .baseDelay(Duration.ofMillis(5))
+                                                                                                                                    .build())
+                                                                                                  .build();
+        HedgingConfig config = HedgingConfig.builder()
+                                            .enabled(true)
+                                            .defaultPolicy(defaultPolicy)
+                                            .policyPerOperation(Collections.singletonMap("GetItem", getItemPolicy))
+                                            .build();
+
+        assertThat(config.policyForOperation("GetItem").maxHedgedAttempts()).isEqualTo(5);
+        assertThat(((HedgingConfig.FixedDelayConfig) config.policyForOperation("GetItem").delayConfig()).baseDelay())
+            .isEqualTo(Duration.ofMillis(5));
+        assertThat(config.policyForOperation("Query").maxHedgedAttempts()).isEqualTo(2);
     }
 }

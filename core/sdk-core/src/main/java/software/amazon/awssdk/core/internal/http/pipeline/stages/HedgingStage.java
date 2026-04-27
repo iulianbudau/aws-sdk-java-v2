@@ -46,6 +46,8 @@ import software.amazon.awssdk.core.internal.http.HttpClientDependencies;
 import software.amazon.awssdk.core.internal.http.RequestExecutionContext;
 import software.amazon.awssdk.core.internal.http.pipeline.RequestPipeline;
 import software.amazon.awssdk.core.internal.http.pipeline.RequestToResponsePipeline;
+import software.amazon.awssdk.core.internal.http.pipeline.stages.utils.HedgingDelayResolver;
+import software.amazon.awssdk.core.internal.http.pipeline.stages.utils.HedgingLatencyTracker;
 import software.amazon.awssdk.core.internal.http.pipeline.stages.utils.HedgingStageHelper;
 import software.amazon.awssdk.core.internal.http.pipeline.stages.utils.RetryableStageHelper;
 import software.amazon.awssdk.http.SdkHttpFullRequest;
@@ -56,7 +58,7 @@ import software.amazon.awssdk.utils.Logger;
 
 /**
  * Sync wrapper around the pipeline for a single request to provide hedging functionality.
- * When hedging is enabled, multiple attempts are started at fixed delays on an executor;
+ * When hedging is enabled, multiple attempts are started using configured fixed/adaptive delays on an executor;
  * the first successful response wins and other attempts are cancelled.
  * <p>
  * Hedging requires a replayable request body. Restrict to idempotent operations via
@@ -87,12 +89,15 @@ public final class HedgingStage<OutputT> implements RequestToResponsePipeline<Ou
         private final SdkHttpFullRequest request;
         private final RequestExecutionContext context;
         private final HedgingConfig hedgingConfig;
+        private final HedgingConfig.OperationHedgingPolicy operationPolicy;
         private final String operationName;
         private final RetryStrategy retryStrategy;
         private final RetryableStageHelper helperForAttempt1;
         private final CompletableFuture<Response<OutputT>> userFuture;
         private final HedgingState state;
+        private final HedgingLatencyTracker latencyTracker;
         private final ExecutionAttributes baseExecutionAttributes;
+        private final long callStartNanos;
         private final AtomicBoolean hedgeCountReported = new AtomicBoolean(false);
         private final AtomicReference<HedgingExecutionState> executionState =
             new AtomicReference<>(HedgingExecutionState.RUNNING);
@@ -112,11 +117,14 @@ public final class HedgingStage<OutputT> implements RequestToResponsePipeline<Ou
                 Optional::empty);
             this.operationName = context.executionAttributes()
                 .getAttribute(SdkExecutionAttribute.OPERATION_NAME);
+            this.operationPolicy = hedgingConfig.policyForOperation(operationName);
             this.retryStrategy = dependencies.clientConfiguration()
                 .option(SdkClientOption.RETRY_STRATEGY);
+            this.latencyTracker = dependencies.clientConfiguration().option(SdkClientOption.HEDGING_LATENCY_TRACKER);
             this.helperForAttempt1 = new RetryableStageHelper(request, context, dependencies);
             this.userFuture = new CompletableFuture<>();
-            this.state = new HedgingState(hedgingConfig.maxHedgedAttempts());
+            this.state = new HedgingState(operationPolicy.maxHedgedAttempts());
+            this.callStartNanos = System.nanoTime();
         }
 
         public Response<OutputT> execute() throws Exception {
@@ -131,7 +139,20 @@ public final class HedgingStage<OutputT> implements RequestToResponsePipeline<Ou
         }
 
         private void setupHedgeCountReporting() {
-            userFuture.whenComplete((r, t) -> state.cancelAllAttempts());
+            userFuture.whenComplete((r, t) -> {
+                state.cancelAllAttempts();
+                recordAdaptiveLatencyIfEnabled();
+            });
+        }
+
+        private void recordAdaptiveLatencyIfEnabled() {
+            if (latencyTracker == null || !(operationPolicy.delayConfig() instanceof HedgingConfig.AdaptiveDelayConfig) ||
+                !hedgingConfig.shouldHedge(operationName)) {
+                return;
+            }
+            Duration latency = Duration.ofNanos(System.nanoTime() - callStartNanos);
+            latencyTracker.record(operationName, latency,
+                                 (HedgingConfig.AdaptiveDelayConfig) operationPolicy.delayConfig());
         }
 
         private boolean isRunning() {
@@ -147,7 +168,7 @@ public final class HedgingStage<OutputT> implements RequestToResponsePipeline<Ou
 
         private void runHedgingLoop(RetryToken initialToken) {
             try {
-                int maxAttempts = hedgingConfig.maxHedgedAttempts();
+                int maxAttempts = operationPolicy.maxHedgedAttempts();
                 totalBudget.set(maxAttempts);
                 scheduleHedgedAttempts(initialToken);
                 startAttempt1(initialToken);
@@ -178,9 +199,10 @@ public final class HedgingStage<OutputT> implements RequestToResponsePipeline<Ou
         }
 
         private void scheduleHedgedAttempts(RetryToken initialToken) {
-            for (int k = 2; k <= hedgingConfig.maxHedgedAttempts(); k++) {
+            for (int k = 2; k <= operationPolicy.maxHedgedAttempts(); k++) {
                 int attemptIndex = k;
-                Duration delay = hedgingConfig.delayBeforeAttempt(k, operationName);
+                Duration delay = HedgingDelayResolver.resolveDelayBeforeAttempt(k, operationPolicy, operationName,
+                                                                                latencyTracker);
                 long delayMs = delay.toMillis();
                 try {
                     ScheduledFuture<?> scheduled = executor.schedule(() -> {
@@ -435,7 +457,6 @@ public final class HedgingStage<OutputT> implements RequestToResponsePipeline<Ou
         private final AtomicInteger attemptsStarted;
         private final List<Throwable> failures;
         private final Object failuresLock;
-        private final int maxHedgedAttempts;
         private final java.util.Set<Integer> debitedFailureAttempts;
 
         HedgingState(int maxHedgedAttempts) {
@@ -444,7 +465,6 @@ public final class HedgingStage<OutputT> implements RequestToResponsePipeline<Ou
             this.attemptsStarted = new AtomicInteger(0);
             this.failures = new ArrayList<>();
             this.failuresLock = new Object();
-            this.maxHedgedAttempts = maxHedgedAttempts;
             this.debitedFailureAttempts = ConcurrentHashMap.newKeySet();
         }
 
@@ -493,10 +513,6 @@ public final class HedgingStage<OutputT> implements RequestToResponsePipeline<Ou
             synchronized (failuresLock) {
                 return new ArrayList<>(failures);
             }
-        }
-
-        int maxHedgedAttempts() {
-            return maxHedgedAttempts;
         }
 
         boolean markFailureDebited(int attemptIndex) {

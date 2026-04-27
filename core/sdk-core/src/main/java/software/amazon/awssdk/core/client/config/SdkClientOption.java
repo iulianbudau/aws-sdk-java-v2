@@ -32,6 +32,7 @@ import software.amazon.awssdk.core.checksums.RequestChecksumCalculation;
 import software.amazon.awssdk.core.checksums.ResponseChecksumValidation;
 import software.amazon.awssdk.core.interceptor.ExecutionAttributes;
 import software.amazon.awssdk.core.interceptor.ExecutionInterceptor;
+import software.amazon.awssdk.core.internal.http.pipeline.stages.utils.HedgingLatencyTracker;
 import software.amazon.awssdk.core.internal.useragent.SdkClientUserAgentProperties;
 import software.amazon.awssdk.core.retry.RetryMode;
 import software.amazon.awssdk.core.retry.RetryPolicy;
@@ -100,6 +101,8 @@ public final class SdkClientOption<T> extends ClientOption<T> {
      * @see ClientOverrideConfiguration#hedgingConfig()
      */
     public static final SdkClientOption<HedgingConfig> HEDGING_CONFIG = new SdkClientOption<>(HedgingConfig.class);
+    public static final SdkClientOption<HedgingLatencyTracker> HEDGING_LATENCY_TRACKER =
+        new SdkClientOption<>(HedgingLatencyTracker.class);
 
     /**
      * @see ClientOverrideConfiguration#executionInterceptors()

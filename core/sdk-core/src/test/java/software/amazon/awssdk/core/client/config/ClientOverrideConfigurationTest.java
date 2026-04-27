@@ -284,7 +284,7 @@ public class ClientOverrideConfigurationTest {
     void hedgingConfig_setAndRetrieved() {
         HedgingConfig hedgingConfig = HedgingConfig.builder()
                 .enabled(true)
-                .maxHedgedAttempts(3)
+                .defaultPolicy(HedgingConfig.OperationHedgingPolicy.builder().maxHedgedAttempts(3).build())
                 .build();
         ClientOverrideConfiguration config = ClientOverrideConfiguration.builder()
                 .hedgingConfig(hedgingConfig)
@@ -295,7 +295,12 @@ public class ClientOverrideConfigurationTest {
 
     @Test
     void hedgingConfig_toBuilder_preservesHedgingConfig() {
-        HedgingConfig hedgingConfig = HedgingConfig.builder().enabled(true).maxHedgedAttempts(3).build();
+        HedgingConfig hedgingConfig = HedgingConfig.builder()
+                                                   .enabled(true)
+                                                   .defaultPolicy(HedgingConfig.OperationHedgingPolicy.builder()
+                                                                                                       .maxHedgedAttempts(3)
+                                                                                                       .build())
+                                                   .build();
         ClientOverrideConfiguration config = ClientOverrideConfiguration.builder()
                 .hedgingConfig(hedgingConfig)
                 .build();

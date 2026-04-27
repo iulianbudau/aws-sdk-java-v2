@@ -22,6 +22,7 @@ import software.amazon.awssdk.core.ClientType;
 import software.amazon.awssdk.core.Response;
 import software.amazon.awssdk.core.SdkRequest;
 import software.amazon.awssdk.core.client.config.SdkClientConfiguration;
+import software.amazon.awssdk.core.client.config.SdkClientOption;
 import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.core.http.ExecutionContext;
 import software.amazon.awssdk.core.http.HttpResponseHandler;
@@ -50,6 +51,7 @@ import software.amazon.awssdk.core.internal.http.pipeline.stages.RetryOrHedgingS
 import software.amazon.awssdk.core.internal.http.pipeline.stages.SigningStage;
 import software.amazon.awssdk.core.internal.http.pipeline.stages.TimeoutExceptionHandlingStage;
 import software.amazon.awssdk.core.internal.http.pipeline.stages.UnwrapResponseContainer;
+import software.amazon.awssdk.core.internal.http.pipeline.stages.utils.HedgingLatencyTracker;
 import software.amazon.awssdk.http.SdkHttpFullRequest;
 import software.amazon.awssdk.utils.SdkAutoCloseable;
 
@@ -60,8 +62,12 @@ public final class AmazonSyncHttpClient implements SdkAutoCloseable {
     private final HttpClientDependencies httpClientDependencies;
 
     public AmazonSyncHttpClient(SdkClientConfiguration clientConfiguration) {
+        SdkClientConfiguration runtimeConfig = clientConfiguration.toBuilder()
+                                                                  .lazyOptionIfAbsent(SdkClientOption.HEDGING_LATENCY_TRACKER,
+                                                                                      c -> new HedgingLatencyTracker())
+                                                                  .build();
         this.httpClientDependencies = HttpClientDependencies.builder()
-                                                            .clientConfiguration(clientConfiguration)
+                                                            .clientConfiguration(runtimeConfig)
                                                             .build();
     }
 

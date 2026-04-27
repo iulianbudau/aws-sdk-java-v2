@@ -132,15 +132,21 @@ class DynamoDbRetryPolicyTest {
     void defaultHedgingConfig_hasExpectedDefaults() {
         HedgingConfig config =
             DynamoDbRetryPolicy.defaultHedgingConfig();
+        HedgingConfig.OperationHedgingPolicy defaultPolicy = config.defaultPolicy();
+        HedgingConfig.OperationHedgingPolicy getItemPolicy = config.policyForOperation("GetItem");
+
         assertThat(config.enabled()).isFalse();
-        assertThat(config.defaultDelay()).isEqualTo(Duration.ofMillis(10));
-        assertThat(config.maxHedgedAttempts()).isEqualTo(3);
-        assertThat(config.delayPerOperation()).containsOnlyKeys("GetItem");
-        assertThat(config.delayPerOperation().get("GetItem")).isEqualTo(Duration.ofMillis(8));
+        assertThat(defaultPolicy.maxHedgedAttempts()).isEqualTo(3);
+        assertThat(((HedgingConfig.FixedDelayConfig) defaultPolicy.delayConfig()).baseDelay())
+            .isEqualTo(Duration.ofMillis(10));
+        assertThat(config.policyPerOperation()).containsOnlyKeys("GetItem");
+        assertThat(getItemPolicy.maxHedgedAttempts()).isEqualTo(3);
+        assertThat(((HedgingConfig.FixedDelayConfig) getItemPolicy.delayConfig()).baseDelay())
+            .isEqualTo(Duration.ofMillis(8));
         assertThat(config.hedgeableOperations()).containsExactlyInAnyOrder("GetItem", "Query", "Scan");
-        assertThat(config.shouldHedge("GetItem")).isTrue();
-        assertThat(config.shouldHedge("Query")).isTrue();
-        assertThat(config.shouldHedge("Scan")).isTrue();
+        assertThat(config.shouldHedge("GetItem")).isFalse();
+        assertThat(config.shouldHedge("Query")).isFalse();
+        assertThat(config.shouldHedge("Scan")).isFalse();
         assertThat(config.shouldHedge("PutItem")).isFalse();
         assertThat(config.shouldHedge("BatchGetItem")).isFalse();
     }

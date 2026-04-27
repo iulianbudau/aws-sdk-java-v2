@@ -33,9 +33,10 @@ import software.amazon.awssdk.utils.builder.CopyableBuilder;
 import software.amazon.awssdk.utils.builder.ToCopyableBuilder;
 
 /**
- * Configuration for request hedging. When hedging is enabled, the SDK starts multiple attempts at fixed delays
- * (e.g. 0 ms, 7 ms, 14 ms) without waiting for the previous attempt to finish. The first successful response wins;
- * other in-flight attempts are cancelled. This can improve tail latency for idempotent operations.
+ * Configuration for request hedging. When hedging is enabled, the SDK starts multiple attempts at configured delays
+ * without waiting for the previous attempt to finish. The first successful response wins; other in-flight attempts are
+ * cancelled. This can improve tail latency for idempotent operations.
+ * Delay mode can be configured as fixed or adaptive. Adaptive mode uses rolling historical latency per operation.
  * <p>
  * Configuration is resolved in order: request-level override ΓåÆ client override configuration ΓåÆ service default ΓåÆ
  * SDK default (hedging disabled).
@@ -50,22 +51,23 @@ import software.amazon.awssdk.utils.builder.ToCopyableBuilder;
 @SdkPublicApi
 public final class HedgingConfig implements ToCopyableBuilder<HedgingConfig.Builder, HedgingConfig> {
 
+    private static final int DEFAULT_ADAPTIVE_SAMPLE_SIZE = 1_000;
+    private static final double DEFAULT_ADAPTIVE_PERCENTILE = 99.0d;
+
     private final boolean enabled;
-    private final Duration defaultDelay;
-    private final int maxHedgedAttempts;
-    private final Map<String, Duration> delayPerOperation;
     private final Set<String> hedgeableOperations;
+    private final OperationHedgingPolicy defaultPolicy;
+    private final Map<String, OperationHedgingPolicy> policyPerOperation;
 
     private HedgingConfig(BuilderImpl builder) {
         this.enabled = builder.enabled;
-        this.defaultDelay = builder.defaultDelay;
-        this.maxHedgedAttempts = Validate.isPositive(builder.maxHedgedAttempts, "maxHedgedAttempts");
-        this.delayPerOperation = builder.delayPerOperation == null
-                ? Collections.emptyMap()
-                : Collections.unmodifiableMap(builder.delayPerOperation);
         this.hedgeableOperations = builder.hedgeableOperations == null
                 ? Collections.emptySet()
                 : Collections.unmodifiableSet(builder.hedgeableOperations);
+        this.defaultPolicy = builder.defaultPolicy == null ? OperationHedgingPolicy.defaultPolicy() : builder.defaultPolicy;
+        this.policyPerOperation = builder.policyPerOperation == null
+                                  ? Collections.emptyMap()
+                                  : Collections.unmodifiableMap(builder.policyPerOperation);
     }
 
     /**
@@ -99,7 +101,7 @@ public final class HedgingConfig implements ToCopyableBuilder<HedgingConfig.Buil
      * Returns a disabled hedging config (default when not configured).
      */
     public static HedgingConfig disabled() {
-        return builder().enabled(false).maxHedgedAttempts(1).build();
+        return builder().enabled(false).build();
     }
 
     /**
@@ -107,28 +109,6 @@ public final class HedgingConfig implements ToCopyableBuilder<HedgingConfig.Buil
      */
     public boolean enabled() {
         return enabled;
-    }
-
-    /**
-     * Default delay before starting each hedged attempt (after the first). Used when no per-operation delay is set.
-     */
-    public Duration defaultDelay() {
-        return defaultDelay;
-    }
-
-    /**
-     * Maximum number of hedged attempts (including the first). Must be at least 1.
-     */
-    public int maxHedgedAttempts() {
-        return maxHedgedAttempts;
-    }
-
-    /**
-     * Per-operation delay overrides, keyed by operation name (e.g. "GetItem", "PutItem"). Missing keys use
-     * {@link #defaultDelay()}.
-     */
-    public Map<String, Duration> delayPerOperation() {
-        return delayPerOperation;
     }
 
     /**
@@ -140,29 +120,19 @@ public final class HedgingConfig implements ToCopyableBuilder<HedgingConfig.Buil
         return hedgeableOperations;
     }
 
-    /**
-     * Resolve the delay before starting hedged attempt at the given index (1-based). Attempt 1 has delay 0.
-     * Subsequent attempts are staggered: attempt 2 at baseDelay, attempt 3 at 2*baseDelay, etc.
-     * Base delay comes from {@link #delayPerOperation()} for the given operation if present,
-     * otherwise {@link #defaultDelay()}.
-     *
-     * @param attemptIndex 1-based attempt index (1 = first attempt, 2 = first hedge, etc.)
-     * @param operationName operation name from execution context, or null
-     * @return delay before this attempt (zero for attempt 1; (attemptIndex - 1) * baseDelay for attempt 2+)
-     */
-    public Duration delayBeforeAttempt(int attemptIndex, String operationName) {
-        if (attemptIndex <= 1) {
-            return Duration.ZERO;
+    public OperationHedgingPolicy defaultPolicy() {
+        return defaultPolicy;
+    }
+
+    public Map<String, OperationHedgingPolicy> policyPerOperation() {
+        return policyPerOperation;
+    }
+
+    public OperationHedgingPolicy policyForOperation(String operationName) {
+        if (operationName != null && policyPerOperation.containsKey(operationName)) {
+            return policyPerOperation.get(operationName);
         }
-        Duration baseDelay;
-        if (operationName != null && delayPerOperation.containsKey(operationName)) {
-            baseDelay = delayPerOperation.get(operationName);
-        } else {
-            baseDelay = defaultDelay != null ? defaultDelay : Duration.ZERO;
-        }
-        long baseMs = baseDelay.toMillis();
-        long delayMs = baseMs * (attemptIndex - 1);
-        return Duration.ofMillis(delayMs);
+        return defaultPolicy;
     }
 
     /**
@@ -193,85 +163,60 @@ public final class HedgingConfig implements ToCopyableBuilder<HedgingConfig.Buil
         }
         HedgingConfig that = (HedgingConfig) o;
         return enabled == that.enabled
-                && maxHedgedAttempts == that.maxHedgedAttempts
-                && Objects.equals(defaultDelay, that.defaultDelay)
-                && Objects.equals(delayPerOperation, that.delayPerOperation)
-                && Objects.equals(hedgeableOperations, that.hedgeableOperations);
+                && Objects.equals(hedgeableOperations, that.hedgeableOperations)
+                && Objects.equals(defaultPolicy, that.defaultPolicy)
+                && Objects.equals(policyPerOperation, that.policyPerOperation);
     }
 
     @Override
     public int hashCode() {
         return Objects.hashCode(enabled)
-                + Objects.hashCode(defaultDelay)
-                + Objects.hashCode(maxHedgedAttempts)
-                + Objects.hashCode(delayPerOperation)
-                + Objects.hashCode(hedgeableOperations);
+                + Objects.hashCode(hedgeableOperations)
+                + Objects.hashCode(defaultPolicy)
+                + Objects.hashCode(policyPerOperation);
     }
 
     @Override
     public String toString() {
         return ToString.builder("HedgingConfig")
                 .add("enabled", enabled)
-                .add("defaultDelay", defaultDelay)
-                .add("maxHedgedAttempts", maxHedgedAttempts)
-                .add("delayPerOperation", delayPerOperation)
                 .add("hedgeableOperations", hedgeableOperations)
+                .add("defaultPolicy", defaultPolicy)
+                .add("policyPerOperation", policyPerOperation)
                 .build();
     }
 
     public interface Builder extends CopyableBuilder<Builder, HedgingConfig> {
         Builder enabled(boolean enabled);
 
-        Builder defaultDelay(Duration defaultDelay);
-
-        Builder maxHedgedAttempts(int maxHedgedAttempts);
-
-        Builder delayPerOperation(Map<String, Duration> delayPerOperation);
-
         Builder hedgeableOperations(Set<String> hedgeableOperations);
+
+        Builder defaultPolicy(OperationHedgingPolicy defaultPolicy);
+
+        Builder policyPerOperation(Map<String, OperationHedgingPolicy> policyPerOperation);
 
         HedgingConfig build();
     }
 
     private static final class BuilderImpl implements Builder {
         private boolean enabled;
-        private Duration defaultDelay;
-        private int maxHedgedAttempts = 3;
-        private Map<String, Duration> delayPerOperation;
         private Set<String> hedgeableOperations;
+        private OperationHedgingPolicy defaultPolicy = OperationHedgingPolicy.defaultPolicy();
+        private Map<String, OperationHedgingPolicy> policyPerOperation;
 
         BuilderImpl() {
         }
 
         BuilderImpl(HedgingConfig config) {
             this.enabled = config.enabled;
-            this.defaultDelay = config.defaultDelay;
-            this.maxHedgedAttempts = config.maxHedgedAttempts;
-            this.delayPerOperation = config.delayPerOperation.isEmpty() ? null : new HashMap<>(config.delayPerOperation);
             this.hedgeableOperations = config.hedgeableOperations.isEmpty() ? null : new HashSet<>(config.hedgeableOperations);
+            this.defaultPolicy = config.defaultPolicy;
+            this.policyPerOperation = config.policyPerOperation.isEmpty() ? null : new HashMap<>(config.policyPerOperation);
         }
 
         @Override
         public Builder enabled(boolean enabled) {
             this.enabled = enabled;
-            return this;
-        }
-
-        @Override
-        public Builder defaultDelay(Duration defaultDelay) {
-            this.defaultDelay = defaultDelay;
-            return this;
-        }
-
-        @Override
-        public Builder maxHedgedAttempts(int maxHedgedAttempts) {
-            this.maxHedgedAttempts = maxHedgedAttempts;
-            return this;
-        }
-
-        @Override
-        public Builder delayPerOperation(Map<String, Duration> delayPerOperation) {
-            this.delayPerOperation = delayPerOperation == null ? null : delayPerOperation;
             return this;
         }
 
@@ -282,8 +227,380 @@ public final class HedgingConfig implements ToCopyableBuilder<HedgingConfig.Buil
         }
 
         @Override
+        public Builder defaultPolicy(OperationHedgingPolicy defaultPolicy) {
+            this.defaultPolicy = defaultPolicy == null ? OperationHedgingPolicy.defaultPolicy() : defaultPolicy;
+            return this;
+        }
+
+        @Override
+        public Builder policyPerOperation(Map<String, OperationHedgingPolicy> policyPerOperation) {
+            this.policyPerOperation = policyPerOperation == null ? null : policyPerOperation;
+            return this;
+        }
+
+        @Override
         public HedgingConfig build() {
             return new HedgingConfig(this);
+        }
+    }
+
+    public interface DelayConfig {
+    }
+
+    @Immutable
+    public static final class FixedDelayConfig implements DelayConfig,
+                                                          ToCopyableBuilder<FixedDelayConfig.Builder, FixedDelayConfig> {
+        private final Duration baseDelay;
+
+        private FixedDelayConfig(BuilderImpl builder) {
+            this.baseDelay = builder.baseDelay == null ? Duration.ZERO : builder.baseDelay;
+            Validate.isTrue(!baseDelay.isNegative(), "baseDelay must be >= 0");
+        }
+
+        public static Builder builder() {
+            return new BuilderImpl();
+        }
+
+        public Duration baseDelay() {
+            return baseDelay;
+        }
+
+        @Override
+        public Builder toBuilder() {
+            return new BuilderImpl(this);
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            FixedDelayConfig that = (FixedDelayConfig) o;
+            return Objects.equals(baseDelay, that.baseDelay);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hashCode(baseDelay);
+        }
+
+        @Override
+        public String toString() {
+            return ToString.builder("FixedDelayConfig")
+                           .add("baseDelay", baseDelay)
+                           .build();
+        }
+
+        public interface Builder extends CopyableBuilder<Builder, FixedDelayConfig> {
+            Builder baseDelay(Duration baseDelay);
+        }
+
+        private static final class BuilderImpl implements Builder {
+            private Duration baseDelay;
+
+            private BuilderImpl() {
+            }
+
+            private BuilderImpl(FixedDelayConfig config) {
+                this.baseDelay = config.baseDelay;
+            }
+
+            @Override
+            public Builder baseDelay(Duration baseDelay) {
+                this.baseDelay = baseDelay;
+                return this;
+            }
+
+            @Override
+            public FixedDelayConfig build() {
+                return new FixedDelayConfig(this);
+            }
+        }
+    }
+
+    @Immutable
+    public static final class OperationHedgingPolicy
+        implements ToCopyableBuilder<OperationHedgingPolicy.Builder, OperationHedgingPolicy> {
+        private final int maxHedgedAttempts;
+        private final DelayConfig delayConfig;
+
+        private OperationHedgingPolicy(BuilderImpl builder) {
+            this.maxHedgedAttempts = Validate.isPositive(builder.maxHedgedAttempts, "maxHedgedAttempts");
+            this.delayConfig = Validate.paramNotNull(builder.delayConfig, "delayConfig");
+        }
+
+        public static Builder builder() {
+            return new BuilderImpl();
+        }
+
+        public static OperationHedgingPolicy defaultPolicy() {
+            return builder()
+                .maxHedgedAttempts(3)
+                .delayConfig(FixedDelayConfig.builder().baseDelay(Duration.ZERO).build())
+                .build();
+        }
+
+        public int maxHedgedAttempts() {
+            return maxHedgedAttempts;
+        }
+
+        public DelayConfig delayConfig() {
+            return delayConfig;
+        }
+
+        @Override
+        public Builder toBuilder() {
+            return new BuilderImpl(this);
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            OperationHedgingPolicy that = (OperationHedgingPolicy) o;
+            return maxHedgedAttempts == that.maxHedgedAttempts && Objects.equals(delayConfig, that.delayConfig);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hashCode(maxHedgedAttempts) + Objects.hashCode(delayConfig);
+        }
+
+        @Override
+        public String toString() {
+            return ToString.builder("OperationHedgingPolicy")
+                           .add("maxHedgedAttempts", maxHedgedAttempts)
+                           .add("delayConfig", delayConfig)
+                           .build();
+        }
+
+        public interface Builder extends CopyableBuilder<Builder, OperationHedgingPolicy> {
+            Builder maxHedgedAttempts(int maxHedgedAttempts);
+
+            Builder delayConfig(DelayConfig delayConfig);
+        }
+
+        private static final class BuilderImpl implements Builder {
+            private int maxHedgedAttempts = 3;
+            private DelayConfig delayConfig = FixedDelayConfig.builder().baseDelay(Duration.ZERO).build();
+
+            private BuilderImpl() {
+            }
+
+            private BuilderImpl(OperationHedgingPolicy policy) {
+                this.maxHedgedAttempts = policy.maxHedgedAttempts;
+                this.delayConfig = policy.delayConfig;
+            }
+
+            @Override
+            public Builder maxHedgedAttempts(int maxHedgedAttempts) {
+                this.maxHedgedAttempts = maxHedgedAttempts;
+                return this;
+            }
+
+            @Override
+            public Builder delayConfig(DelayConfig delayConfig) {
+                this.delayConfig = delayConfig;
+                return this;
+            }
+
+            @Override
+            public OperationHedgingPolicy build() {
+                return new OperationHedgingPolicy(this);
+            }
+        }
+    }
+
+    @Immutable
+    public static final class AdaptiveDelayConfig
+        implements DelayConfig, ToCopyableBuilder<AdaptiveDelayConfig.Builder, AdaptiveDelayConfig> {
+        private final double percentile;
+        private final int sampleSize;
+        private final int minSamplesRequired;
+        private final Duration fallbackDelay;
+        private final Duration minDelay;
+        private final Duration maxDelay;
+
+        private AdaptiveDelayConfig(BuilderImpl builder) {
+            this.percentile = builder.percentile == null ? DEFAULT_ADAPTIVE_PERCENTILE : builder.percentile;
+            this.sampleSize = builder.sampleSize == null ? DEFAULT_ADAPTIVE_SAMPLE_SIZE : builder.sampleSize;
+            this.minSamplesRequired = builder.minSamplesRequired == null
+                                      ? Math.min(20, sampleSize)
+                                      : builder.minSamplesRequired;
+            this.fallbackDelay = builder.fallbackDelay == null ? Duration.ZERO : builder.fallbackDelay;
+            this.minDelay = builder.minDelay;
+            this.maxDelay = builder.maxDelay;
+
+            Validate.isTrue(percentile > 0 && percentile <= 100,
+                            "percentile must be > 0 and <= 100");
+            Validate.isTrue(sampleSize > 0, "sampleSize must be > 0");
+            Validate.isTrue(minSamplesRequired >= 1 && minSamplesRequired <= sampleSize,
+                            "minSamplesRequired must be >= 1 and <= sampleSize");
+            Validate.isTrue(!fallbackDelay.isNegative(), "fallbackDelay must be >= 0");
+            if (minDelay != null) {
+                Validate.isTrue(!minDelay.isNegative(), "minDelay must be >= 0");
+            }
+            if (maxDelay != null) {
+                Validate.isTrue(!maxDelay.isNegative(), "maxDelay must be >= 0");
+            }
+            if (minDelay != null && maxDelay != null) {
+                Validate.isTrue(!maxDelay.minus(minDelay).isNegative(), "minDelay must be <= maxDelay");
+            }
+        }
+
+        public static Builder builder() {
+            return new BuilderImpl();
+        }
+
+        public double percentile() {
+            return percentile;
+        }
+
+        public int sampleSize() {
+            return sampleSize;
+        }
+
+        public int minSamplesRequired() {
+            return minSamplesRequired;
+        }
+
+        public Duration fallbackDelay() {
+            return fallbackDelay;
+        }
+
+        public Duration minDelay() {
+            return minDelay;
+        }
+
+        public Duration maxDelay() {
+            return maxDelay;
+        }
+
+        @Override
+        public Builder toBuilder() {
+            return new BuilderImpl(this);
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            AdaptiveDelayConfig that = (AdaptiveDelayConfig) o;
+            return Double.compare(that.percentile, percentile) == 0 &&
+                   sampleSize == that.sampleSize &&
+                   minSamplesRequired == that.minSamplesRequired &&
+                   Objects.equals(fallbackDelay, that.fallbackDelay) &&
+                   Objects.equals(minDelay, that.minDelay) &&
+                   Objects.equals(maxDelay, that.maxDelay);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hashCode(percentile)
+                   + Objects.hashCode(sampleSize)
+                   + Objects.hashCode(minSamplesRequired)
+                   + Objects.hashCode(fallbackDelay)
+                   + Objects.hashCode(minDelay)
+                   + Objects.hashCode(maxDelay);
+        }
+
+        @Override
+        public String toString() {
+            return ToString.builder("AdaptiveDelayConfig")
+                           .add("percentile", percentile)
+                           .add("sampleSize", sampleSize)
+                           .add("minSamplesRequired", minSamplesRequired)
+                           .add("fallbackDelay", fallbackDelay)
+                           .add("minDelay", minDelay)
+                           .add("maxDelay", maxDelay)
+                           .build();
+        }
+
+        public interface Builder extends CopyableBuilder<Builder, AdaptiveDelayConfig> {
+            Builder percentile(double percentile);
+
+            Builder sampleSize(int sampleSize);
+
+            Builder minSamplesRequired(int minSamplesRequired);
+
+            Builder fallbackDelay(Duration fallbackDelay);
+
+            Builder minDelay(Duration minDelay);
+
+            Builder maxDelay(Duration maxDelay);
+        }
+
+        private static final class BuilderImpl implements Builder {
+            private Double percentile;
+            private Integer sampleSize;
+            private Integer minSamplesRequired;
+            private Duration fallbackDelay;
+            private Duration minDelay;
+            private Duration maxDelay;
+
+            private BuilderImpl() {
+            }
+
+            private BuilderImpl(AdaptiveDelayConfig config) {
+                this.percentile = config.percentile;
+                this.sampleSize = config.sampleSize;
+                this.minSamplesRequired = config.minSamplesRequired;
+                this.fallbackDelay = config.fallbackDelay;
+                this.minDelay = config.minDelay;
+                this.maxDelay = config.maxDelay;
+            }
+
+            @Override
+            public Builder percentile(double percentile) {
+                this.percentile = percentile;
+                return this;
+            }
+
+            @Override
+            public Builder sampleSize(int sampleSize) {
+                this.sampleSize = sampleSize;
+                return this;
+            }
+
+            @Override
+            public Builder minSamplesRequired(int minSamplesRequired) {
+                this.minSamplesRequired = minSamplesRequired;
+                return this;
+            }
+
+            @Override
+            public Builder fallbackDelay(Duration fallbackDelay) {
+                this.fallbackDelay = fallbackDelay;
+                return this;
+            }
+
+            @Override
+            public Builder minDelay(Duration minDelay) {
+                this.minDelay = minDelay;
+                return this;
+            }
+
+            @Override
+            public Builder maxDelay(Duration maxDelay) {
+                this.maxDelay = maxDelay;
+                return this;
+            }
+
+            @Override
+            public AdaptiveDelayConfig build() {
+                return new AdaptiveDelayConfig(this);
+            }
         }
     }
 }

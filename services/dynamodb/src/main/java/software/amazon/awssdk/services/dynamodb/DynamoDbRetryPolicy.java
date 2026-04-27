@@ -21,7 +21,6 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.Map;
 import java.util.Set;
 import software.amazon.awssdk.annotations.SdkInternalApi;
 import software.amazon.awssdk.awscore.retry.AwsRetryPolicy;
@@ -139,19 +138,30 @@ final class DynamoDbRetryPolicy {
     }
 
     /**
-     * Default hedging config for DynamoDB: disabled by default, with {@link #HEDGE_DELAY} as default
-     * delay, {@value #MAX_HEDGE_ATTEMPTS} max hedged attempts, GetItem-specific delay
-     * {@link #GET_ITEM_HEDGE_DELAY}, and only GetItem, Query and Scan allow-listed as hedgeable.
+     * Default hedging config for DynamoDB: disabled by default, with fixed-delay policy and only
+     * GetItem, Query and Scan allow-listed as hedgeable.
      * Used by the DynamoDB client builder when hedging is not explicitly configured. Callers must
      * set {@code enabled(true)} to use hedging.
      */
     public static HedgingConfig defaultHedgingConfig() {
-        Map<String, Duration> delayPerOperation = Collections.singletonMap("GetItem", GET_ITEM_HEDGE_DELAY);
+        HedgingConfig.OperationHedgingPolicy defaultPolicy =
+            HedgingConfig.OperationHedgingPolicy.builder()
+                                                .maxHedgedAttempts(MAX_HEDGE_ATTEMPTS)
+                                                .delayConfig(HedgingConfig.FixedDelayConfig.builder()
+                                                                                           .baseDelay(HEDGE_DELAY)
+                                                                                           .build())
+                                                .build();
+        HedgingConfig.OperationHedgingPolicy getItemPolicy =
+            HedgingConfig.OperationHedgingPolicy.builder()
+                                                .maxHedgedAttempts(MAX_HEDGE_ATTEMPTS)
+                                                .delayConfig(HedgingConfig.FixedDelayConfig.builder()
+                                                                                           .baseDelay(GET_ITEM_HEDGE_DELAY)
+                                                                                           .build())
+                                                .build();
         return HedgingConfig.builder()
                 .enabled(false)
-                .defaultDelay(HEDGE_DELAY)
-                .maxHedgedAttempts(MAX_HEDGE_ATTEMPTS)
-                .delayPerOperation(delayPerOperation)
+                .defaultPolicy(defaultPolicy)
+                .policyPerOperation(Collections.singletonMap("GetItem", getItemPolicy))
                 .hedgeableOperations(HEDGEABLE_OPERATIONS)
                 .build();
     }

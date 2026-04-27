@@ -33,7 +33,6 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import software.amazon.awssdk.annotations.SdkInternalApi;
@@ -48,6 +47,8 @@ import software.amazon.awssdk.core.internal.http.HttpClientDependencies;
 import software.amazon.awssdk.core.internal.http.RequestExecutionContext;
 import software.amazon.awssdk.core.internal.http.TransformingAsyncResponseHandler;
 import software.amazon.awssdk.core.internal.http.pipeline.RequestPipeline;
+import software.amazon.awssdk.core.internal.http.pipeline.stages.utils.HedgingDelayResolver;
+import software.amazon.awssdk.core.internal.http.pipeline.stages.utils.HedgingLatencyTracker;
 import software.amazon.awssdk.core.internal.http.pipeline.stages.utils.HedgingStageHelper;
 import software.amazon.awssdk.core.internal.http.pipeline.stages.utils.RetryableStageHelper;
 import software.amazon.awssdk.http.SdkHttpFullRequest;
@@ -59,7 +60,7 @@ import software.amazon.awssdk.utils.Logger;
 
 /**
  * Wrapper around the pipeline for a single request to provide hedging functionality.
- * When hedging is enabled, multiple attempts are started at fixed delays; the first successful
+ * When hedging is enabled, multiple attempts are started using configured fixed/adaptive delays; the first successful
  * response wins and other attempts are cancelled.
  * <p>
  * Each hedge attempt has its own isolated response handler to prevent race conditions.
@@ -73,8 +74,6 @@ public final class AsyncHedgingStage<OutputT> implements RequestPipeline<SdkHttp
 
     private static final Logger log = Logger.loggerFor(AsyncHedgingStage.class);
     
-    // Global counter for unique request IDs (for debugging/logging)
-    private static final AtomicLong REQUEST_ID_COUNTER = new AtomicLong(0);
 
     private final Supplier<TransformingAsyncResponseHandler<Response<OutputT>>> responseHandlerFactory;
     private final RequestPipeline<SdkHttpFullRequest, CompletableFuture<Response<OutputT>>> requestPipeline;
@@ -110,11 +109,14 @@ public final class AsyncHedgingStage<OutputT> implements RequestPipeline<SdkHttp
         private final SdkHttpFullRequest request;
         private final RequestExecutionContext context;
         private final HedgingConfig hedgingConfig;
+        private final HedgingConfig.OperationHedgingPolicy operationPolicy;
         private final String operationName;
         private final RetryStrategy retryStrategy;
         private final RetryableStageHelper helperForAttempt1;
         private final CompletableFuture<Response<OutputT>> userFuture;
         private final ExecutionAttributes baseExecutionAttributes;
+        private final HedgingLatencyTracker latencyTracker;
+        private final long callStartNanos;
         
         // State machine for atomic transitions
         private final AtomicReference<HedgingExecutionState> state = new AtomicReference<>(HedgingExecutionState.RUNNING);
@@ -144,9 +146,6 @@ public final class AsyncHedgingStage<OutputT> implements RequestPipeline<SdkHttp
         // Ensure hedge count is only reported once (same pattern as sync HedgingStage)
         private final AtomicBoolean hedgeCountReported = new AtomicBoolean(false);
         
-        // Unique ID for this request (for debugging/logging)
-        private final long requestId = REQUEST_ID_COUNTER.incrementAndGet();
-
         private HedgingExecutor(SdkHttpFullRequest request, RequestExecutionContext context) {
             this.request = request;
             this.context = context;
@@ -156,14 +155,16 @@ public final class AsyncHedgingStage<OutputT> implements RequestPipeline<SdkHttp
                 Optional.ofNullable(dependencies.clientConfiguration().option(SdkClientOption.HEDGING_CONFIG)),
                 Optional::empty);
             this.operationName = context.executionAttributes().getAttribute(SdkExecutionAttribute.OPERATION_NAME);
+            this.operationPolicy = hedgingConfig.policyForOperation(operationName);
             this.retryStrategy = dependencies.clientConfiguration().option(SdkClientOption.RETRY_STRATEGY);
+            this.latencyTracker = dependencies.clientConfiguration().option(SdkClientOption.HEDGING_LATENCY_TRACKER);
             this.helperForAttempt1 = new RetryableStageHelper(request, context, dependencies);
             this.userFuture = new CompletableFuture<>();
+            this.callStartNanos = System.nanoTime();
+            this.userFuture.whenComplete((r, t) -> recordAdaptiveLatencyIfEnabled());
         }
 
         public CompletableFuture<Response<OutputT>> execute() {
-            log.debug(() -> String.format("[HEDGE-R%d] execute() START - op=%s, maxAttempts=%d",
-                requestId, operationName, hedgingConfig.maxHedgedAttempts()));
             try {
                 Duration initialDelay = helperForAttempt1.acquireInitialToken();
                 RetryToken initialToken = context.executionAttributes().getAttribute(RETRY_TOKEN);
@@ -182,11 +183,9 @@ public final class AsyncHedgingStage<OutputT> implements RequestPipeline<SdkHttp
         }
 
         private void runHedgingLoop(RetryToken initialToken) {
-            log.debug(() -> String.format("[HEDGE] runHedgingLoop() START - maxAttempts=%d", 
-                hedgingConfig.maxHedgedAttempts()));
             try {
                 // Set budget upfront: 1 initial + (maxHedgedAttempts - 1) scheduled hedges
-                int maxAttempts = hedgingConfig.maxHedgedAttempts();
+                int maxAttempts = operationPolicy.maxHedgedAttempts();
                 totalBudget.set(maxAttempts);
                 
                 // Schedule hedge attempts BEFORE starting attempt 1
@@ -202,11 +201,12 @@ public final class AsyncHedgingStage<OutputT> implements RequestPipeline<SdkHttp
         }
 
         private void scheduleHedgedAttempts(RetryToken initialToken) {
-            log.debug(() -> String.format("[HEDGE] scheduleHedgedAttempts() - scheduling attempts 2 to %d", 
-                hedgingConfig.maxHedgedAttempts()));
-            for (int k = 2; k <= hedgingConfig.maxHedgedAttempts(); k++) {
+            log.debug(() -> String.format("[HEDGE] scheduleHedgedAttempts() - scheduling attempts 2 to %d",
+                operationPolicy.maxHedgedAttempts()));
+            for (int k = 2; k <= operationPolicy.maxHedgedAttempts(); k++) {
                 int attemptIndex = k;
-                Duration delay = hedgingConfig.delayBeforeAttempt(k, operationName);
+                Duration delay = HedgingDelayResolver.resolveDelayBeforeAttempt(k, operationPolicy, operationName,
+                                                                                latencyTracker);
                 long delayMs = delay.toMillis();
                 log.debug(() -> String.format("[HEDGE] Scheduling attempt %d with delay %dms", attemptIndex, delayMs));
                 
@@ -255,8 +255,8 @@ public final class AsyncHedgingStage<OutputT> implements RequestPipeline<SdkHttp
 
         private void startAttempt(int attemptIndex, RetryToken token) {
             int currentCount = attemptsStarted.incrementAndGet();
-            log.debug(() -> String.format("[HEDGE-R%d] startAttempt(%d) - attemptsStarted=%d, state=%s", 
-                requestId, attemptIndex, currentCount, state.get()));
+            log.debug(() -> String.format("[HEDGE] startAttempt(%d) - attemptsStarted=%d, state=%s",
+                attemptIndex, currentCount, state.get()));
             
             // Check if we should actually proceed
             if (!isRunning()) {
@@ -283,7 +283,8 @@ public final class AsyncHedgingStage<OutputT> implements RequestPipeline<SdkHttp
                     HedgingStageHelper.buildHedgeInfoHeaderValue(
                         attemptIndex,
                         totalBudget.get(),
-                        hedgingConfig.delayBeforeAttempt(attemptIndex, operationName).toMillis()))
+                        HedgingDelayResolver.resolveDelayBeforeAttempt(attemptIndex, operationPolicy, operationName,
+                                                                       latencyTracker).toMillis()))
                 .build();
             
             CompletableFuture<Response<OutputT>> attemptFuture;
@@ -390,19 +391,19 @@ public final class AsyncHedgingStage<OutputT> implements RequestPipeline<SdkHttp
          */
         private void tryCompleteWithSuccess(Response<OutputT> response, RetryToken token) {
             int currentStarted = attemptsStarted.get();
-            log.debug(() -> String.format("[HEDGE-R%d] tryCompleteWithSuccess() - attemptsStarted=%d, state=%s", 
-                requestId, currentStarted, state.get()));
+            log.debug(() -> String.format("[HEDGE] tryCompleteWithSuccess() - attemptsStarted=%d, state=%s",
+                currentStarted, state.get()));
             
             if (state.compareAndSet(HedgingExecutionState.RUNNING, HedgingExecutionState.COMPLETING)) {
-                log.debug(() -> String.format("[HEDGE-R%d] WON THE RACE", requestId));
+                log.debug(() -> "[HEDGE] attempt won the race");
                 
                 // CRITICAL: Report metrics BEFORE completing userFuture!
                 // When userFuture completes, downstream handlers will call metricCollector.collect()
                 // which finalizes the metrics. Any metrics reported AFTER that will be lost.
                 try {
                     int finalStarted = attemptsStarted.get();
-                    log.debug(() -> String.format("[HEDGE-R%d] reportHedgeCount BEFORE userFuture.complete, attemptsStarted=%d", 
-                        requestId, finalStarted));
+                    log.debug(() -> String.format("[HEDGE] reportHedgeCount before completion, attemptsStarted=%d",
+                        finalStarted));
                     reportHedgeCount();
                     if (retryStrategy != null && token != null) {
                         // Use recordSuccessForHedging to release tokens WITHOUT reporting RETRY_COUNT.
@@ -422,7 +423,7 @@ public final class AsyncHedgingStage<OutputT> implements RequestPipeline<SdkHttp
                 }
                 
                 // Now complete the user future - this triggers downstream handlers
-                log.debug(() -> String.format("[HEDGE-R%d] completing userFuture", requestId));
+                log.debug(() -> "[HEDGE] completing userFuture");
                 userFuture.complete(response);
                 state.set(HedgingExecutionState.COMPLETED);
                 return;
@@ -487,6 +488,16 @@ public final class AsyncHedgingStage<OutputT> implements RequestPipeline<SdkHttp
             return state.get() == HedgingExecutionState.RUNNING;
         }
 
+        private void recordAdaptiveLatencyIfEnabled() {
+            if (latencyTracker == null || !(operationPolicy.delayConfig() instanceof HedgingConfig.AdaptiveDelayConfig) ||
+                !hedgingConfig.shouldHedge(operationName)) {
+                return;
+            }
+            Duration latency = Duration.ofNanos(System.nanoTime() - callStartNanos);
+            latencyTracker.record(operationName, latency,
+                                 (HedgingConfig.AdaptiveDelayConfig) operationPolicy.delayConfig());
+        }
+
         private void cancelAllOtherAttempts() {
             // Cancel all attempt futures
             List<CompletableFuture<?>> futuresToCancel;
@@ -548,7 +559,7 @@ public final class AsyncHedgingStage<OutputT> implements RequestPipeline<SdkHttp
         private void reportHedgeCount() {
             // Use AtomicBoolean guard to ensure we only report once (same pattern as sync HedgingStage)
             if (!hedgeCountReported.compareAndSet(false, true)) {
-                log.debug(() -> String.format("[HEDGE-R%d] reportHedgeCount() - SKIPPED (already reported)", requestId));
+                log.debug(() -> "[HEDGE] reportHedgeCount skipped (already reported)");
                 return;
             }
             
@@ -558,21 +569,18 @@ public final class AsyncHedgingStage<OutputT> implements RequestPipeline<SdkHttp
             boolean hasCollector = collector != null;
             String collectorType = hasCollector ? collector.getClass().getSimpleName() : "null";
             log.debug(() -> String.format(
-                "[HEDGE-R%d] reportHedgeCount() - attemptsStarted=%d, hedgeCount=%d, collectorType=%s", 
-                requestId, started, hedgeCount, collectorType));
+                "[HEDGE] reportHedgeCount attemptsStarted=%d, hedgeCount=%d, collectorType=%s",
+                started, hedgeCount, collectorType));
             if (hasCollector) {
                 collector.reportMetric(HEDGE_COUNT, hedgeCount);
                 // Log at INFO level for hedge > 0 to make it easier to find
                 if (hedgeCount > 0) {
-                    log.debug(() -> String.format(
-                        "[HEDGE-R%d] REPORTED hedgeCount=%d to %s", requestId, hedgeCount, collectorType));
+                    log.debug(() -> String.format("[HEDGE] reported hedgeCount=%d to %s", hedgeCount, collectorType));
                 } else {
-                    log.debug(() -> String.format(
-                        "[HEDGE-R%d] REPORTED hedgeCount=%d", requestId, hedgeCount));
+                    log.debug(() -> String.format("[HEDGE] reported hedgeCount=%d", hedgeCount));
                 }
             } else {
-                log.warn(() -> String.format(
-                    "[HEDGE-R%d] NO metricCollector - hedgeCount=%d NOT reported!", requestId, hedgeCount));
+                log.debug(() -> String.format("[HEDGE] no metricCollector - hedgeCount=%d not reported", hedgeCount));
             }
         }
 

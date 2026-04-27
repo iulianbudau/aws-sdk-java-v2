@@ -25,6 +25,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static software.amazon.awssdk.core.client.config.SdkClientOption.HEDGING_CONFIG;
+import static software.amazon.awssdk.core.client.config.SdkClientOption.HEDGING_LATENCY_TRACKER;
 import static software.amazon.awssdk.core.client.config.SdkClientOption.RETRY_STRATEGY;
 import static software.amazon.awssdk.core.client.config.SdkClientOption.SCHEDULED_EXECUTOR_SERVICE;
 import static software.amazon.awssdk.core.internal.InternalCoreExecutionAttribute.EXECUTION_ATTEMPT;
@@ -71,6 +72,7 @@ import software.amazon.awssdk.http.SdkHttpResponse;
 import software.amazon.awssdk.retries.api.AcquireInitialTokenResponse;
 import software.amazon.awssdk.retries.api.RetryStrategy;
 import software.amazon.awssdk.retries.api.RetryToken;
+import software.amazon.awssdk.core.internal.http.pipeline.stages.utils.HedgingLatencyTracker;
 import software.amazon.awssdk.retries.internal.DefaultRetryToken;
 
 public class HedgingStageTest {
@@ -113,8 +115,12 @@ public class HedgingStageTest {
             .option(RETRY_STRATEGY, retryStrategy)
             .option(HEDGING_CONFIG, HedgingConfig.builder()
                 .enabled(true)
-                .maxHedgedAttempts(3)
-                .defaultDelay(Duration.ofMillis(10))
+                .defaultPolicy(HedgingConfig.OperationHedgingPolicy.builder()
+                                                                   .maxHedgedAttempts(3)
+                                                                   .delayConfig(HedgingConfig.FixedDelayConfig.builder()
+                                                                                                              .baseDelay(Duration.ofMillis(10))
+                                                                                                              .build())
+                                                                   .build())
                 .build())
             .option(SCHEDULED_EXECUTOR_SERVICE, scheduledExecutor)
             .build();
@@ -411,8 +417,12 @@ public class HedgingStageTest {
     public void operationNotInHedgeableList_shouldNotHedge() throws Exception {
         HedgingConfig config = HedgingConfig.builder()
             .enabled(true)
-            .maxHedgedAttempts(3)
-            .defaultDelay(Duration.ofMillis(10))
+            .defaultPolicy(HedgingConfig.OperationHedgingPolicy.builder()
+                                                               .maxHedgedAttempts(3)
+                                                               .delayConfig(HedgingConfig.FixedDelayConfig.builder()
+                                                                                                          .baseDelay(Duration.ofMillis(10))
+                                                                                                          .build())
+                                                               .build())
             .hedgeableOperations(Collections.singleton("Query"))
             .build();
 
@@ -499,9 +509,20 @@ public class HedgingStageTest {
     public void perOperationDelay_shouldUseOperationSpecificDelay() throws Exception {
         HedgingConfig config = HedgingConfig.builder()
             .enabled(true)
-            .maxHedgedAttempts(3)
-            .defaultDelay(Duration.ofMillis(20))
-            .delayPerOperation(Collections.singletonMap("GetItem", Duration.ofMillis(5)))
+            .defaultPolicy(HedgingConfig.OperationHedgingPolicy.builder()
+                                                               .maxHedgedAttempts(3)
+                                                               .delayConfig(HedgingConfig.FixedDelayConfig.builder()
+                                                                                                          .baseDelay(Duration.ofMillis(20))
+                                                                                                          .build())
+                                                               .build())
+            .policyPerOperation(Collections.singletonMap("GetItem",
+                                                         HedgingConfig.OperationHedgingPolicy.builder()
+                                                                                            .maxHedgedAttempts(3)
+                                                                                            .delayConfig(HedgingConfig.FixedDelayConfig
+                                                                                                             .builder()
+                                                                                                             .baseDelay(Duration.ofMillis(5))
+                                                                                                             .build())
+                                                                                            .build()))
             .build();
 
         SdkClientConfiguration clientConfig = SdkClientConfiguration.builder()
@@ -644,8 +665,12 @@ public class HedgingStageTest {
             .option(RETRY_STRATEGY, retryStrategy)
             .option(HEDGING_CONFIG, HedgingConfig.builder()
                 .enabled(true)
-                .maxHedgedAttempts(2)
-                .defaultDelay(Duration.ofMillis(10))
+                .defaultPolicy(HedgingConfig.OperationHedgingPolicy.builder()
+                                                                   .maxHedgedAttempts(2)
+                                                                   .delayConfig(HedgingConfig.FixedDelayConfig.builder()
+                                                                                                              .baseDelay(Duration.ofMillis(10))
+                                                                                                              .build())
+                                                                   .build())
                 .build())
             .option(SCHEDULED_EXECUTOR_SERVICE, scheduledExecutor)
             .build();
@@ -884,5 +909,129 @@ public class HedgingStageTest {
         assertThatThrownBy(() -> hedgingStage.execute(request, context))
             .isInstanceOf(SdkException.class)
             .hasMessageContaining("null response and null exception");
+    }
+
+    @Test
+    @Timeout(5)
+    public void adaptiveMode_firstCallUsesFallback_secondCallUsesLearnedDelay() throws Exception {
+        HedgingLatencyTracker tracker = new HedgingLatencyTracker();
+        HedgingConfig.AdaptiveDelayConfig adaptiveCfg = HedgingConfig.AdaptiveDelayConfig.builder()
+                                                                                          .percentile(99)
+                                                                                          .sampleSize(100)
+                                                                                          .minSamplesRequired(1)
+                                                                                          .fallbackDelay(Duration.ofMillis(20))
+                                                                                          .minDelay(Duration.ofMillis(7))
+                                                                                          .maxDelay(Duration.ofMillis(7))
+                                                                                          .build();
+        HedgingConfig config = HedgingConfig.builder()
+                                            .enabled(true)
+                                            .defaultPolicy(HedgingConfig.OperationHedgingPolicy.builder()
+                                                                                               .maxHedgedAttempts(3)
+                                                                                               .delayConfig(adaptiveCfg)
+                                                                                               .build())
+                                            .build();
+
+        SdkClientConfiguration clientConfig = SdkClientConfiguration.builder()
+                                                                    .option(RETRY_STRATEGY, retryStrategy)
+                                                                    .option(HEDGING_CONFIG, config)
+                                                                    .option(HEDGING_LATENCY_TRACKER, tracker)
+                                                                    .option(SCHEDULED_EXECUTOR_SERVICE, scheduledExecutor)
+                                                                    .build();
+        dependencies = HttpClientDependencies.builder().clientConfiguration(clientConfig).build();
+        hedgingStage = new HedgingStage<>(dependencies, requestPipeline);
+
+        Response<String> successResponse = Response.<String>builder()
+                                                   .httpResponse(SdkHttpResponse.builder().statusCode(200).build())
+                                                   .isSuccess(true)
+                                                   .build();
+        when(requestPipeline.execute(any(), any())).thenReturn(successResponse);
+
+        ArgumentCaptor<Long> delayCaptor = ArgumentCaptor.forClass(Long.class);
+        when(scheduledExecutor.schedule(any(Runnable.class), delayCaptor.capture(), eq(TimeUnit.MILLISECONDS)))
+            .thenAnswer(invocation -> {
+                Runnable task = invocation.getArgument(0);
+                executorService.submit(task);
+                return scheduledFuture;
+            });
+
+        hedgingStage.execute(request, context);
+        List<Long> capturedAfterFirst = new ArrayList<>(delayCaptor.getAllValues());
+        int firstCount = capturedAfterFirst.size();
+        List<Long> firstDelays = new ArrayList<>(capturedAfterFirst);
+        assertThat(firstDelays).contains(20L, 40L);
+
+        hedgingStage.execute(request, context);
+        List<Long> capturedAfterSecond = new ArrayList<>(delayCaptor.getAllValues());
+        List<Long> secondDelays = new ArrayList<>(capturedAfterSecond.subList(firstCount, capturedAfterSecond.size()));
+        assertThat(secondDelays).contains(7L, 14L);
+    }
+
+    @Test
+    @Timeout(5)
+    public void adaptiveMode_whenOperationNotHedgeable_doesNotRecordLatency() throws Exception {
+        HedgingLatencyTracker tracker = new HedgingLatencyTracker();
+        HedgingConfig.AdaptiveDelayConfig adaptiveCfg = HedgingConfig.AdaptiveDelayConfig.builder()
+                                                                                          .percentile(99)
+                                                                                          .sampleSize(100)
+                                                                                          .minSamplesRequired(1)
+                                                                                          .fallbackDelay(Duration.ofMillis(11))
+                                                                                          .minDelay(Duration.ofMillis(3))
+                                                                                          .maxDelay(Duration.ofMillis(3))
+                                                                                          .build();
+        HedgingConfig config = HedgingConfig.builder()
+                                            .enabled(true)
+                                            .hedgeableOperations(Collections.singleton("Query"))
+                                            .defaultPolicy(HedgingConfig.OperationHedgingPolicy.builder()
+                                                                                               .maxHedgedAttempts(3)
+                                                                                               .delayConfig(adaptiveCfg)
+                                                                                               .build())
+                                            .build();
+
+        SdkClientConfiguration clientConfig = SdkClientConfiguration.builder()
+                                                                    .option(RETRY_STRATEGY, retryStrategy)
+                                                                    .option(HEDGING_CONFIG, config)
+                                                                    .option(HEDGING_LATENCY_TRACKER, tracker)
+                                                                    .option(SCHEDULED_EXECUTOR_SERVICE, scheduledExecutor)
+                                                                    .build();
+        dependencies = HttpClientDependencies.builder().clientConfiguration(clientConfig).build();
+        hedgingStage = new HedgingStage<>(dependencies, requestPipeline);
+
+        ExecutionAttributes attrs = new ExecutionAttributes();
+        attrs.putAttribute(SdkExecutionAttribute.OPERATION_NAME, "PutItem");
+        attrs.putAttribute(RETRY_TOKEN, initialToken);
+        attrs.putAttribute(EXECUTION_ATTEMPT, 1);
+        context = RequestExecutionContext.builder()
+                                         .originalRequest(NoopTestRequest.builder()
+                                                                         .overrideConfiguration(SdkRequestOverrideConfiguration
+                                                                                                    .builder().build())
+                                                                         .build())
+                                         .executionContext(ExecutionContext.builder().executionAttributes(attrs).build())
+                                         .build();
+
+        Response<String> successResponse = Response.<String>builder()
+                                                   .httpResponse(SdkHttpResponse.builder().statusCode(200).build())
+                                                   .isSuccess(true)
+                                                   .build();
+        when(requestPipeline.execute(any(), any())).thenReturn(successResponse);
+
+        ArgumentCaptor<Long> delayCaptor = ArgumentCaptor.forClass(Long.class);
+        when(scheduledExecutor.schedule(any(Runnable.class), delayCaptor.capture(), eq(TimeUnit.MILLISECONDS)))
+            .thenAnswer(invocation -> {
+                Runnable task = invocation.getArgument(0);
+                executorService.submit(task);
+                return scheduledFuture;
+            });
+
+        hedgingStage.execute(request, context);
+        List<Long> capturedAfterFirst = new ArrayList<>(delayCaptor.getAllValues());
+        int firstCount = capturedAfterFirst.size();
+        List<Long> firstDelays = new ArrayList<>(capturedAfterFirst);
+        hedgingStage.execute(request, context);
+        List<Long> capturedAfterSecond = new ArrayList<>(delayCaptor.getAllValues());
+        List<Long> secondDelays = new ArrayList<>(capturedAfterSecond.subList(firstCount, capturedAfterSecond.size()));
+
+        // Since shouldHedge(op) is false for PutItem under this config, adaptive samples are not recorded.
+        assertThat(firstDelays).contains(11L, 22L);
+        assertThat(secondDelays).contains(11L, 22L);
     }
 }
