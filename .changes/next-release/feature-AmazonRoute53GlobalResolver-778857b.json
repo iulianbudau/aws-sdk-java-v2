@@ -1,6 +1,0 @@
-{
-    "type": "feature",
-    "category": "Amazon Route 53 Global Resolver",
-    "contributor": "",
-    "description": "Adds support for regions in the UpdateGlobalResolver input."
-}

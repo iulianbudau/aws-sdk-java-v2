@@ -1,6 +1,0 @@
-{
-    "type": "feature",
-    "category": "CloudWatch Observability Admin Service",
-    "contributor": "",
-    "description": "Observability Admin enablement launch for AWS Kafka, Bedrock Agent Core Workload Identity and OTel metric enablement."
-}
