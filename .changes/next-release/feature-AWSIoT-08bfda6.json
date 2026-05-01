@@ -1,6 +1,0 @@
-{
-    "type": "feature",
-    "category": "AWS IoT",
-    "contributor": "",
-    "description": "AWS IoT HTTP rule actions now support cross-topic batching, combining messages from different MQTT topics into single HTTP requests."
-}
