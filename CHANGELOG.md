@@ -1,4 +1,45 @@
  #### 👋 _Looking for changelogs for older versions? You can find them in the [changelogs](./changelogs) directory._
+# __2.44.1__ __2026-05-04__
+## __AWS Elemental MediaLive__
+  - ### Features
+    - Updates the type of the MediaLiveRouterOutputConnectionMap.
+
+## __AWS SDK for Java v2__
+  - ### Features
+    - Optimized JSON marshalling performance for JSON RPC, REST JSON and RPCv2 Cbor protocols.
+
+## __AWS Security Agent__
+  - ### Features
+    - AWS Security Agent is adding a new target domain verification method for private VPC penetration testing. Additionally, the target domain resource will now have a verification status reason field to surface additional details about domain verification
+
+## __Amazon Bedrock AgentCore Control__
+  - ### Features
+    - Amazon Bedrock AgentCore gateways now support MCP Sessions and response streaming from MCP targets. Session timeouts can be set between 15 minutes and 8 hours, and response streaming enables forwarding stream events sent by MCP targets to gateway users.
+
+## __Amazon CloudWatch Logs__
+  - ### Features
+    - Adding an additional optional deliverySourceConfiguration field to PutDeliverySource API. This enables customers to pass service-specific configurations through IngestionHub such as tracing enablement or sampling rates that will be propagated to the source resource.
+
+## __Amazon Elastic Compute Cloud__
+  - ### Features
+    - This feature allows customers to change the tunnel bandwidth on existing VPN connections using the ModifyVpnConnectionOptions API
+
+## __Amazon Lex Model Building Service__
+  - ### Features
+    - Lex V1 is deprecated, use Lex V2 instead
+
+## __Amazon Location Service Routes V2__
+  - ### Features
+    - Added support for TravelTimeExceedsDriverWorkHours, ViolatedBlockedRoad, and ViolatedVehicleRestriction notice codes to the CalculateRoutes API response.
+
+## __Amazon VPC Lattice__
+  - ### Features
+    - Amazon VPC Lattice now supports privately resolvable DNS resources
+
+## __S3 Transfer Manager__
+  - ### Bugfixes
+    - Fix S3 Transfer Manager progress tracking overshoot when a multipart download part-get is retried after partial data delivery
+
 # __2.44.0__ __2026-05-01__
 ## __AWS EntityResolution__
   - ### Features
