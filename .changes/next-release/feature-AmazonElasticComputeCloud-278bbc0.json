@@ -1,0 +1,6 @@
+{
+    "type": "feature",
+    "category": "Amazon Elastic Compute Cloud",
+    "contributor": "",
+    "description": "This feature allows customers to change the tunnel bandwidth on existing VPN connections using the ModifyVpnConnectionOptions API"
+}
