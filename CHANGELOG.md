@@ -1,4 +1,44 @@
  #### 👋 _Looking for changelogs for older versions? You can find them in the [changelogs](./changelogs) directory._
+# __2.44.2__ __2026-05-05__
+## __AWS Clean Rooms ML__
+  - ### Features
+    - Increase max configurable output limits in the Clean Rooms ML configured model algorithm association resource.
+
+## __AWS Health Imaging__
+  - ### Features
+    - Add support for DICOM Json Metadata Override features in startDICOMImportJob API
+
+## __AWS Marketplace Agreement Service__
+  - ### Features
+    - With this release, Agreements API provides a programmatic way to generate quotes, accept offers, track charges and entitlements, manage renewals and cancellations, and streamline operations entirely through APIs without navigating to the AWS Marketplace website or AWS Management Console.
+
+## __AWS MediaTailor__
+  - ### Features
+    - Added support for Monetization Functions. Monetization Functions let you enrich ad requests with external data and transform session parameters using JSONata expressions, without deploying custom infrastructure.
+
+## __AWS SDK for Java v2__
+  - ### Features
+    - Updated endpoint and partition metadata.
+
+  - ### Bugfixes
+    - Fix an issue in the async SDK clients where a retry can lead to a `NullPointerException` if the exception that the SDK encountered did not originate from the service, such as a connection exception.
+
+## __Amazon CloudFront__
+  - ### Features
+    - Adds support for tagging CloudFront Functions and KeyValueStores resources.
+
+## __Amazon OpenSearch Service__
+  - ### Features
+    - Amazon OpenSearch Service now supports VPC egress, enabling outbound traffic from your OpenSearch domain to route privately through your VPC instead of the public internet.
+
+## __Amazon Route 53 Domains__
+  - ### Features
+    - This release adds the TLDInMaintenance exception.
+
+## __Amazon SageMaker Service__
+  - ### Features
+    - Adds support for ml.p5.4xlarge instance type for SageMaker Studio JupyterLab and CodeEditor apps for IAD (us-east-1), NRT (ap-northeast-1), BOM (ap-south-1), CGK (ap-southeast-3), GRU (sa-east-1), PDX (us-west-2), CMH (us-east-2).
+
 # __2.44.1__ __2026-05-04__
 ## __AWS Elemental MediaLive__
   - ### Features
