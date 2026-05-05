@@ -1,0 +1,6 @@
+{
+    "type": "feature",
+    "category": "AWS Clean Rooms ML",
+    "contributor": "",
+    "description": "Increase max configurable output limits in the Clean Rooms ML configured model algorithm association resource."
+}
