@@ -1,6 +1,0 @@
-{
-    "type": "feature",
-    "category": "EC2 Image Builder",
-    "contributor": "",
-    "description": "The ImportDiskImage API now enforces a maximum character limit of 128 characters on the image name field."
-}
