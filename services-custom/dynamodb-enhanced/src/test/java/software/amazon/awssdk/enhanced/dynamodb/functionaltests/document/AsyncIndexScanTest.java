@@ -44,6 +44,7 @@ import software.amazon.awssdk.enhanced.dynamodb.model.CreateTableEnhancedRequest
 import software.amazon.awssdk.enhanced.dynamodb.model.EnhancedGlobalSecondaryIndex;
 import software.amazon.awssdk.enhanced.dynamodb.model.Page;
 import software.amazon.awssdk.enhanced.dynamodb.model.ScanEnhancedRequest;
+import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.DeleteTableRequest;
 import software.amazon.awssdk.services.dynamodb.model.ProjectionType;
 
@@ -106,7 +107,7 @@ public class AsyncIndexScanTest extends LocalDynamoDbAsyncTestBase {
     @Test
     public void scanAllRecordsWithFilter() {
         insertDocuments();
-        Map<String, software.amazon.awssdk.services.dynamodb.model.AttributeValue> expressionValues = new HashMap<>();
+        Map<String, AttributeValue> expressionValues = new HashMap<>();
         expressionValues.put(":min_value", numberValue(3));
         expressionValues.put(":max_value", numberValue(5));
         Expression expression = Expression.builder()
@@ -130,7 +131,7 @@ public class AsyncIndexScanTest extends LocalDynamoDbAsyncTestBase {
     @Test
     public void scanExclusiveStartKey() {
         insertDocuments();
-        Map<String, software.amazon.awssdk.services.dynamodb.model.AttributeValue> startKey = new HashMap<>();
+        Map<String, AttributeValue> startKey = new HashMap<>();
         startKey.put("id", stringValue("id-value"));
         startKey.put("sort", numberValue(7));
         startKey.put("gsi_id", stringValue("gsi-id-value"));

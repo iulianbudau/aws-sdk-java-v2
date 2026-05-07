@@ -23,6 +23,7 @@ import static software.amazon.awssdk.enhanced.dynamodb.AttributeConverterProvide
 import static software.amazon.awssdk.enhanced.dynamodb.internal.AttributeValues.stringValue;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.assertj.core.api.Assertions;
@@ -611,7 +612,7 @@ public class BasicCrudTest extends LocalDynamoDbSyncTestBase {
         extensionTable.updateItem(document);
 
         EnhancedDocument persisted = extensionTable.getItem(r -> r.key(k -> k.partitionValue("doc-1")));
-        assertThat(persisted, is(org.hamcrest.Matchers.notNullValue()));
+        assertThat(persisted, is(notNullValue()));
         getDynamoDbClient().deleteTable(r -> r.tableName(extensionTableName));
     }
 
@@ -638,7 +639,7 @@ public class BasicCrudTest extends LocalDynamoDbSyncTestBase {
         itemMap.put("id", AttributeValue.fromS("doc-1"));
         itemMap.put("time", AttributeValue.fromS("root-original"));
         itemMap.put("payload", AttributeValue.fromM(nested));
-        itemMap.put("records", AttributeValue.fromL(java.util.Collections.singletonList(AttributeValue.fromM(nested))));
+        itemMap.put("records", AttributeValue.fromL(Collections.singletonList(AttributeValue.fromM(nested))));
 
         EnhancedDocument document = EnhancedDocument.fromAttributeValueMap(itemMap).toBuilder()
                                                     .attributeConverterProviders(defaultProvider())

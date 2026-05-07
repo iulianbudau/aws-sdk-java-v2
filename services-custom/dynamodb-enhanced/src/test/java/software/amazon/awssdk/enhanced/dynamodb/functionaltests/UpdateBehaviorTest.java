@@ -5,7 +5,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertTrue;
 
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -692,16 +694,16 @@ public class UpdateBehaviorTest extends LocalDynamoDbSyncTestBase {
     }
 
     private Map<String, AttributeValue> buildCustomSchemaItem(String key) {
-        Map<String, AttributeValue> nested = new java.util.HashMap<>();
+        Map<String, AttributeValue> nested = new HashMap<>();
         nested.put("city", AttributeValue.builder().s("Seattle").build());
         nested.put("country", AttributeValue.builder().s("US").build());
-        Map<String, AttributeValue> mapElement = new java.util.HashMap<>();
+        Map<String, AttributeValue> mapElement = new HashMap<>();
         mapElement.put("inner", AttributeValue.builder().s("value").build());
 
-        Map<String, AttributeValue> item = new java.util.HashMap<>();
+        Map<String, AttributeValue> item = new HashMap<>();
         item.put("pk", AttributeValue.builder().s(key).build());
         item.put("nested", AttributeValue.builder().m(nested).build());
-        item.put("records", AttributeValue.builder().l(java.util.Arrays.asList(
+        item.put("records", AttributeValue.builder().l(Arrays.asList(
             AttributeValue.builder().m(mapElement).build(),
             AttributeValue.builder().s("literal").build())).build());
         return item;

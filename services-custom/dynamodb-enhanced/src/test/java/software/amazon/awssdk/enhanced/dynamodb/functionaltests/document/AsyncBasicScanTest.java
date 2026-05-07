@@ -42,6 +42,7 @@ import software.amazon.awssdk.enhanced.dynamodb.document.EnhancedDocument;
 import software.amazon.awssdk.enhanced.dynamodb.functionaltests.LocalDynamoDbAsyncTestBase;
 import software.amazon.awssdk.enhanced.dynamodb.model.Page;
 import software.amazon.awssdk.enhanced.dynamodb.model.ScanEnhancedRequest;
+import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.DeleteTableRequest;
 import software.amazon.awssdk.services.dynamodb.model.Select;
 
@@ -93,7 +94,7 @@ public class AsyncBasicScanTest extends LocalDynamoDbAsyncTestBase {
     @Test
     public void scanAllRecordsWithFilterAndProjection() {
         insertDocuments();
-        Map<String, software.amazon.awssdk.services.dynamodb.model.AttributeValue> expressionValues = new HashMap<>();
+        Map<String, AttributeValue> expressionValues = new HashMap<>();
         expressionValues.put(":min_value", numberValue(3));
         expressionValues.put(":max_value", numberValue(5));
         Expression expression = Expression.builder()
@@ -123,7 +124,7 @@ public class AsyncBasicScanTest extends LocalDynamoDbAsyncTestBase {
     @Test
     public void scanExclusiveStartKey() {
         insertDocuments();
-        Map<String, software.amazon.awssdk.services.dynamodb.model.AttributeValue> key = new HashMap<>();
+        Map<String, AttributeValue> key = new HashMap<>();
         key.put("id", stringValue("id-value"));
         key.put("sort", numberValue(7));
         Page<EnhancedDocument> page = drainPublisher(docMappedTable.scan(b -> b.exclusiveStartKey(key)), 1).get(0);
