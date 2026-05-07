@@ -496,7 +496,7 @@ public class AsyncTransactWriteItemsTest extends LocalDynamoDbAsyncTestBase {
     }
 
     @Test
-    public void mixedCommands_returnValuesOnConditionCheckFailureSet_allConditionsFail() {
+    public void transactWrite_withConditionCheckFailure_shouldReturnAllOldValues() {
         mappedTable1.putItem(r -> r.item(RECORDS_1.get(0))).join();
         mappedTable1.putItem(r -> r.item(RECORDS_1.get(1))).join();
         mappedTable2.putItem(r -> r.item(RECORDS_2.get(0))).join();
@@ -550,7 +550,7 @@ public class AsyncTransactWriteItemsTest extends LocalDynamoDbAsyncTestBase {
     }
 
     @Test
-    public void transactWriteWithSupportedAndUnsupportedSchema_withAutoTimestampEnabled_succeeds() {
+    public void transactWrite_withSupportedAndUnsupportedSchema_shouldPreserveValues() {
         Map<String, AttributeValue> customItem = new HashMap<>();
         customItem.put("pk", AttributeValue.builder().s("custom-1").build());
         customItem.put("payload",
@@ -571,7 +571,7 @@ public class AsyncTransactWriteItemsTest extends LocalDynamoDbAsyncTestBase {
     }
 
     @Test
-    public void transactWriteWithSupportedAndUnsupportedSchema_withAutoTimestampEnabled_withResponse_succeeds() {
+    public void transactWriteWithResponse_withSupportedAndUnsupportedSchema_shouldReturnMetrics() {
         Map<String, AttributeValue> customItem = new HashMap<>();
         customItem.put("pk", AttributeValue.builder().s("custom-1").build());
         customItem.put("payload",

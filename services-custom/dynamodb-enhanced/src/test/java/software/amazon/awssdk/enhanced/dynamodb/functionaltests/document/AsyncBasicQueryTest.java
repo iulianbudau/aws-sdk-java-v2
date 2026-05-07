@@ -91,7 +91,7 @@ public class AsyncBasicQueryTest extends LocalDynamoDbAsyncTestBase {
     }
 
     @Test
-    public void queryAllRecordsDefaultSettings_withProjectionAndSelectSpecificAttributes() {
+    public void queryAllRecords_withProjection_shouldSelectOnlyProjectedAttributes() {
         insertDocuments();
         SdkPublisher<Page<EnhancedDocument>> publisher =
             docMappedTable.query(b -> b.queryConditional(keyEqualTo(k -> k.partitionValue("id-value")))
@@ -116,7 +116,7 @@ public class AsyncBasicQueryTest extends LocalDynamoDbAsyncTestBase {
     }
 
     @Test
-    public void queryAllRecordsDefaultSettings_withDotProjectionName() {
+    public void queryRecords_withDottedAttributeName_shouldProjectCorrectly() {
         EnhancedDocument nested = EnhancedDocument.builder()
                                                   .attributeConverterProviders(defaultProvider())
                                                   .putString("id", "id-value")

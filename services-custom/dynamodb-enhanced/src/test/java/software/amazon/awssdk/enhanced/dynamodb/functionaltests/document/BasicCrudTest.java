@@ -588,7 +588,7 @@ public class BasicCrudTest extends LocalDynamoDbSyncTestBase {
     }
 
     @Test
-    public void extensionEnabledDocumentSchema_putAndUpdateDoNotThrow() {
+    public void documentSchema_withExtension_putAndUpdate_shouldSucceed() {
         String extensionTableName = getConcreteTableName("doc-extension-table");
         DynamoDbEnhancedClient extensionClient = DynamoDbEnhancedClient.builder()
                                                                        .dynamoDbClient(getDynamoDbClient())
@@ -616,7 +616,7 @@ public class BasicCrudTest extends LocalDynamoDbSyncTestBase {
     }
 
     @Test
-    public void extensionEnabledDocumentSchema_putAndUpdate_preservesTimestampLikeAndNestedValues() {
+    public void documentSchema_withExtension_shouldPreserveNonTimestampValues() {
         String extensionTableName = getConcreteTableName("doc-extension-integrity-table");
         DynamoDbEnhancedClient extensionClient = DynamoDbEnhancedClient.builder()
                                                                        .dynamoDbClient(getDynamoDbClient())
@@ -656,7 +656,7 @@ public class BasicCrudTest extends LocalDynamoDbSyncTestBase {
     }
 
     @Test
-    public void extensionEnabledDocumentSchema_deleteItemDoesNotThrow() {
+    public void documentSchema_withExtension_deleteItem_shouldSucceed() {
         String extensionTableName = getConcreteTableName("doc-extension-delete-table");
         DynamoDbEnhancedClient extensionClient = DynamoDbEnhancedClient.builder()
                                                                        .dynamoDbClient(getDynamoDbClient())
@@ -683,7 +683,7 @@ public class BasicCrudTest extends LocalDynamoDbSyncTestBase {
     }
 
     @Test
-    public void extensionEnabledDocumentSchema_batchWriteWithResponse_preservesValuesAndReturnsMetrics() {
+    public void documentSchemaBatchWrite_withExtension_shouldPreserveValuesAndReturnMetrics() {
         String extensionTableName = getConcreteTableName("doc-extension-batch-table");
         DynamoDbEnhancedClient extensionClient = DynamoDbEnhancedClient.builder()
                                                                        .dynamoDbClient(getDynamoDbClient())
@@ -728,7 +728,7 @@ public class BasicCrudTest extends LocalDynamoDbSyncTestBase {
     }
 
     @Test
-    public void extensionEnabledDocumentSchema_transactWriteWithResponse_preservesValuesAndReturnsMetrics() {
+    public void documentSchemaTransactWrite_withExtension_shouldPreserveValuesAndReturnMetrics() {
         String extensionTableName = getConcreteTableName("doc-extension-transact-table");
         DynamoDbEnhancedClient extensionClient = DynamoDbEnhancedClient.builder()
                                                                        .dynamoDbClient(getDynamoDbClient())

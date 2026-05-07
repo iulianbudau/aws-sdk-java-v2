@@ -357,7 +357,7 @@ public class AsyncBatchGetItemTest extends LocalDynamoDbAsyncTestBase {
     }
 
     @Test
-    public void getRecordsFromMultipleTables_withExtensionEnabled_doesNotThrowAndMatches() {
+    public void batchGetRecordsWithExtension_shouldPreserveAndReturnCorrectData() {
         insertRecords();
 
         DynamoDbEnhancedAsyncClient extensionClient =
@@ -404,7 +404,7 @@ public class AsyncBatchGetItemTest extends LocalDynamoDbAsyncTestBase {
     }
 
     @Test
-    public void getRecordsFromMixedSchemaTables_inSingleRequest_matchesExpected() {
+    public void batchGetRecords_fromMixedSchemaTypes_shouldReturnCorrectlyCastItems() {
         insertRecords();
         BeanRecord bean = new BeanRecord();
         bean.setId(10);

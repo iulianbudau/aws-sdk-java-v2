@@ -212,7 +212,7 @@ public class AsyncIndexScanTest extends LocalDynamoDbAsyncTestBase {
     }
 
     @Test
-    public void scanAllRecordsDefaultSettings_withReturnConsumedCapacityIndexes() {
+    public void scanAllRecords_withConsumedCapacity_shouldReturnIndexMetrics() {
         insertRecords();
         SdkPublisher<Page<Record>> publisher =
             keysOnlyMappedIndex.scan(r -> r.returnConsumedCapacity(ReturnConsumedCapacity.INDEXES));

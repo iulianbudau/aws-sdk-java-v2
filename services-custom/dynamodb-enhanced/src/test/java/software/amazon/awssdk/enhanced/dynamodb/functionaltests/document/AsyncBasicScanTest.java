@@ -113,7 +113,7 @@ public class AsyncBasicScanTest extends LocalDynamoDbAsyncTestBase {
     }
 
     @Test
-    public void scanAllRecordsDefaultSettings_selectCount() {
+    public void scanAllRecords_withSelectCount_shouldReturnCount() {
         insertDocuments();
         Page<EnhancedDocument> page = drainPublisher(docMappedTable.scan(b -> b.select(Select.COUNT)), 1).get(0);
         assertThat(page.count(), is(DOCUMENTS.size()));

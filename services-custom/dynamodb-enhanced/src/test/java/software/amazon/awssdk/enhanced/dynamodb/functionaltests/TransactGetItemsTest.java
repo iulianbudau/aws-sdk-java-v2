@@ -189,7 +189,7 @@ public class TransactGetItemsTest extends LocalDynamoDbSyncTestBase {
     }
 
     @Test
-    public void getRecordsFromMultipleTables_withExtensionEnabled_doesNotThrowAndMatches() {
+    public void transactGetRecords_withExtension_shouldPreserveAndReturnCorrectData() {
         insertRecords();
 
         DynamoDbEnhancedClient extensionClient = DynamoDbEnhancedClient.builder()

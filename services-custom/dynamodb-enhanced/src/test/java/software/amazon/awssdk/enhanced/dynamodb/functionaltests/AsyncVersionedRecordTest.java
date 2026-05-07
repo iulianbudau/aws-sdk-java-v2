@@ -57,11 +57,13 @@ public class AsyncVersionedRecordTest extends LocalDynamoDbAsyncTestBase {
     }
 
     @Test
-    public void updateAndTransactWrite_incrementVersion() {
+    public void transactWrite_updateVersionedRecord_shouldIncrementVersion() {
         Record record = new Record();
         record.setId("id1");
         record.setAttribute("v1");
         mappedTable.updateItem(record).join();
+        Record persistedAfterFirstUpdate = mappedTable.getItem(r -> r.key(k -> k.partitionValue("id1"))).join();
+        assertThat(persistedAfterFirstUpdate.getVersion()).isEqualTo(1);
 
         Record update = new Record();
         update.setId("id1");
@@ -70,7 +72,7 @@ public class AsyncVersionedRecordTest extends LocalDynamoDbAsyncTestBase {
         enhancedAsyncClient.transactWriteItems(r -> r.addUpdateItem(mappedTable, update)).join();
 
         Record persisted = mappedTable.getItem(r -> r.key(k -> k.partitionValue("id1"))).join();
-        assertThat(persisted.getVersion()).isEqualTo(2);
+        assertThat(persisted.getVersion()).isEqualTo(persistedAfterFirstUpdate.getVersion() + 1);
         assertThat(persisted.getAttribute()).isEqualTo("v2");
     }
 }

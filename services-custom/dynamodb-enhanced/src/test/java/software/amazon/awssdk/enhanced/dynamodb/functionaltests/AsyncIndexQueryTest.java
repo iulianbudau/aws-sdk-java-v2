@@ -18,6 +18,7 @@ package software.amazon.awssdk.enhanced.dynamodb.functionaltests;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.greaterThan;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
@@ -234,7 +235,7 @@ public class AsyncIndexQueryTest extends LocalDynamoDbAsyncTestBase {
     }
 
     @Test
-    public void queryBetween_withReturnConsumedCapacityIndexes() {
+    public void queryBetween_withConsumedCapacity_shouldReturnIndexMetrics() {
         insertRecords();
         Key fromKey = Key.builder().partitionValue("gsi-id-value").sortValue(3).build();
         Key toKey = Key.builder().partitionValue("gsi-id-value").sortValue(5).build();
@@ -247,6 +248,8 @@ public class AsyncIndexQueryTest extends LocalDynamoDbAsyncTestBase {
                    is(KEYS_ONLY_RECORDS.stream().filter(r -> r.sort >= 3 && r.sort <= 5).collect(Collectors.toList())));
         assertThat(page.consumedCapacity(), is(notNullValue()));
         assertThat(page.consumedCapacity().globalSecondaryIndexes(), is(notNullValue()));
+        assertThat(page.consumedCapacity().globalSecondaryIndexes().isEmpty(), is(false));
+        assertThat(page.consumedCapacity().capacityUnits(), is(greaterThan(0d)));
         assertThat(page.count(), equalTo(3));
         assertThat(page.scannedCount(), equalTo(3));
     }

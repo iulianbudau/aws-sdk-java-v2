@@ -480,7 +480,7 @@ public class AsyncBatchWriteItemTest extends LocalDynamoDbAsyncTestBase {
     }
 
     @Test
-    public void batchWriteWithSupportedAndUnsupportedSchema_withAutoTimestampEnabled_succeeds() {
+    public void batchWrite_withSupportedAndUnsupportedSchema_shouldPreserveUnsupportedSchemaValues() {
         Map<String, AttributeValue> customItem = new HashMap<>();
         customItem.put("pk", AttributeValue.builder().s("custom-1").build());
         customItem.put("payload",
@@ -510,7 +510,7 @@ public class AsyncBatchWriteItemTest extends LocalDynamoDbAsyncTestBase {
     }
 
     @Test
-    public void batchWriteWithSupportedAndUnsupportedSchema_withAutoTimestampEnabled_withResponse_succeeds() {
+    public void batchWriteWithResponse_withSupportedAndUnsupportedSchema_shouldReturnMetrics() {
         Map<String, AttributeValue> customItem = new HashMap<>();
         customItem.put("pk", AttributeValue.builder().s("custom-1").build());
         customItem.put("payload",

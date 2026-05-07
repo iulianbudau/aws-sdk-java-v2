@@ -203,7 +203,7 @@ public class AsyncBasicScanTest extends LocalDynamoDbAsyncTestBase {
     }
 
     @Test
-    public void scanAllRecords_withProjection() {
+    public void scanAllRecords_withAttributeProjection_shouldExcludeUnprojectedAttributes() {
         insertRecords();
         SdkPublisher<Page<Record>> publisher = mappedTable.scan(b -> b.attributesToProject("sort"));
         List<Page<Record>> results = drainPublisher(publisher, 1);
@@ -215,7 +215,7 @@ public class AsyncBasicScanTest extends LocalDynamoDbAsyncTestBase {
     }
 
     @Test
-    public void scanAllRecordsWithFilterAndProjection() {
+    public void scanRecords_withBothFilterAndProjection_shouldApplyBoth() {
         insertRecords();
         Map<String, AttributeValue> expressionValues = new HashMap<>();
         expressionValues.put(":min_value", numberValue(3));
@@ -329,7 +329,7 @@ public class AsyncBasicScanTest extends LocalDynamoDbAsyncTestBase {
     }
 
     @Test
-    public void scanAllRecordsWithSelect_count() {
+    public void scanAllRecords_withSelectCount_shouldReturnCountNotItems() {
         insertRecords();
         Map<String, AttributeValue> expressionValues = new HashMap<>();
         expressionValues.put(":min_value", numberValue(3));
@@ -350,7 +350,7 @@ public class AsyncBasicScanTest extends LocalDynamoDbAsyncTestBase {
     }
 
     @Test
-    public void scanAllRecordsWithFilterAndNestedProjectionSingleAttribute() {
+    public void scanRecords_withBothFilterAndNestedProjection_shouldApplyBoth() {
         insertNestedRecords();
         Map<String, AttributeValue> expressionValues = new HashMap<>();
         expressionValues.put(":min_value", numberValue(3));
@@ -370,7 +370,7 @@ public class AsyncBasicScanTest extends LocalDynamoDbAsyncTestBase {
     }
 
     @Test
-    public void scanAllRecordsWithNestedProjectionNameEmptyNameMap() {
+    public void scanRecords_withEmptyNestedAttributeName_shouldThrowAssertionError() {
         insertNestedRecords();
         Map<String, AttributeValue> expressionValues = new HashMap<>();
         expressionValues.put(":min_value", numberValue(3));
@@ -389,6 +389,19 @@ public class AsyncBasicScanTest extends LocalDynamoDbAsyncTestBase {
                                                                                                                     .build())
                                                                             .build()),
                                 1));
+    }
+
+    @Test
+    public void scanRecords_withEmptyTopLevelAttributeName_shouldThrowAssertionError() {
+        insertNestedRecords();
+        Map<String, AttributeValue> expressionValues = new HashMap<>();
+        expressionValues.put(":min_value", numberValue(3));
+        expressionValues.put(":max_value", numberValue(5));
+        Expression expression = Expression.builder()
+                                          .expression("#sort >= :min_value AND #sort <= :max_value")
+                                          .expressionValues(expressionValues)
+                                          .putExpressionName("#sort", "sort")
+                                          .build();
         assertThatExceptionOfType(AssertionError.class).isThrownBy(
             () -> drainPublisher(mappedNestedTable.scan(ScanEnhancedRequest.builder()
                                                                             .filterExpression(expression)

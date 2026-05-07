@@ -199,7 +199,7 @@ public class AtomicCounterTest extends LocalDynamoDbSyncTestBase {
     }
 
     @Test
-    public void updateWithConditionExpression_incrementsCountersAndPreservesConditionedAttribute() {
+    public void updateItem_withConditionExpression_shouldIncrementCountersAndPreserveAttribute() {
         AtomicCounterRecord record = new AtomicCounterRecord();
         record.setId(RECORD_ID);
         record.setAttribute1("initial");

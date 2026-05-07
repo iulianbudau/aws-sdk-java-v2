@@ -167,7 +167,7 @@ public class AsyncPutItemWithResponseTest extends LocalDynamoDbAsyncTestBase {
     }
 
     @Test
-    public void returnValues_allOld_extensionInvokedOnReturnedValues() {
+    public void putItemWithResponse_returnAllOld_shouldInvokeExtensionOnReturnedValues() {
         DynamoDbEnhancedClientExtension extension = Mockito.spy(new NoOpExtension());
         DynamoDbEnhancedAsyncClient extensionClient = DynamoDbEnhancedAsyncClient.builder()
                                                                                  .dynamoDbClient(getDynamoDbAsyncClient())
@@ -182,8 +182,8 @@ public class AsyncPutItemWithResponseTest extends LocalDynamoDbAsyncTestBase {
         Record update = new Record().setId(77).setStringAttr1("b");
         extensionTable.putItemWithResponse(r -> r.returnValues(ReturnValue.ALL_OLD).item(update)).join();
 
-        Mockito.verify(extension).afterRead(any(DynamoDbExtensionContext.AfterRead.class));
-        Mockito.verify(extension, Mockito.atLeast(2)).beforeWrite(any(DynamoDbExtensionContext.BeforeWrite.class));
+        Mockito.verify(extension, Mockito.times(1)).afterRead(any(DynamoDbExtensionContext.AfterRead.class));
+        Mockito.verify(extension, Mockito.times(2)).beforeWrite(any(DynamoDbExtensionContext.BeforeWrite.class));
         getDynamoDbAsyncClient().deleteTable(DeleteTableRequest.builder()
                                                                .tableName(getConcreteTableName("table-name-extension"))
                                                                .build()).join();

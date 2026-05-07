@@ -246,7 +246,7 @@ public class FlattenMapTest extends LocalDynamoDbSyncTestBase {
     }
 
     @Test
-    public void updateItemWithUnsupportedCustomSchemaAndMixedNestedPayload_doesNotThrow() {
+    public void updateItem_withUnsupportedCustomSchema_shouldSucceedWithMixedNestedData() {
         String customTableName = getConcreteTableName("custom-flatten-table");
         DynamoDbTable<Map<String, AttributeValue>> customTable =
             enhancedClient.table(customTableName, new UnsupportedConverterTableSchema());
@@ -275,7 +275,7 @@ public class FlattenMapTest extends LocalDynamoDbSyncTestBase {
     }
 
     @Test
-    public void putUpdateScanBatchGet_preservesFlattenMapContent() {
+    public void flattenMap_acrossMultipleOperations_shouldPreserveValues() {
         FlattenMapValidBean record = new FlattenMapValidBean();
         record.setId("cross-1");
         record.setRootAttribute1("root-1");

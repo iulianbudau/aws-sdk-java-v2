@@ -44,7 +44,7 @@ public class AsyncUpdateBehaviorTest extends LocalDynamoDbAsyncTestBase {
     }
 
     @Test
-    public void secondUpdate_preservesWriteIfNotExistsAndIncrementsVersion() {
+    public void updateItem_withWriteIfNotExistsBehavior_shouldPreserveOnSecondUpdateAndIncrementVersion() {
         RecordWithUpdateBehaviors seed = new RecordWithUpdateBehaviors();
         seed.setId("id1");
         seed.setCreatedOn(INSTANT_1);
@@ -60,7 +60,7 @@ public class AsyncUpdateBehaviorTest extends LocalDynamoDbAsyncTestBase {
 
         RecordWithUpdateBehaviors persisted = mappedTable.getItem(r -> r.key(k -> k.partitionValue("id1"))).join();
         assertThat(persisted.getVersion()).isEqualTo(2L);
-        assertThat(persisted.getCreatedOn()).isEqualTo(INSTANT_1);
+        assertThat(persisted.getCreatedOn()).as("WRITE_IF_NOT_EXISTS should preserve created time").isEqualTo(INSTANT_1);
         assertThat(persisted.getLastUpdatedOn()).isEqualTo(INSTANT_2);
     }
 }

@@ -118,7 +118,7 @@ public class DeleteItemWithResponseTest extends LocalDynamoDbSyncTestBase {
     }
 
     @Test
-    public void deleteItem_andDeleteItemWithResponse_haveEquivalentState() {
+    public void deleteItem_simpleAndWithResponse_shouldReturnSameAttributes() {
         Record first = new Record().setId(11).setStringAttr1("a");
         mappedTable1.putItem(first);
         Record deletedBySimple = mappedTable1.deleteItem(r -> r.key(k -> k.partitionValue(11)));

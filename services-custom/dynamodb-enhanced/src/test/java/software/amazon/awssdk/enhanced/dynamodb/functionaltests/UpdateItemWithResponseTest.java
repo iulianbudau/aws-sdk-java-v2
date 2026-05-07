@@ -157,7 +157,7 @@ public class UpdateItemWithResponseTest extends LocalDynamoDbSyncTestBase {
     }
 
     @Test
-    public void returnValues_allOld_attributesMapped() {
+    public void updateItemWithResponse_returnAllOld_shouldMapAttributes() {
         Record original = new Record().setId(1).setStringAttr1("attr");
         mappedTable1.putItem(original);
         Record updated = new Record().setId(1).setStringAttr1("attr2");
@@ -167,7 +167,7 @@ public class UpdateItemWithResponseTest extends LocalDynamoDbSyncTestBase {
     }
 
     @Test
-    public void returnValues_allNew_attributesMapped() {
+    public void updateItemWithResponse_returnAllNew_shouldMapAttributes() {
         Record original = new Record().setId(1).setStringAttr1("attr");
         mappedTable1.putItem(original);
         Record updated = new Record().setId(1).setStringAttr1("attr2");
@@ -177,7 +177,7 @@ public class UpdateItemWithResponseTest extends LocalDynamoDbSyncTestBase {
     }
 
     @Test
-    public void returnValues_none_attributesNull() {
+    public void updateItemWithResponse_returnNone_shouldHaveNullAttributes() {
         Record original = new Record().setId(1).setStringAttr1("attr");
         mappedTable1.putItem(original);
         Record updated = new Record().setId(1).setStringAttr1("attr2");
@@ -187,22 +187,24 @@ public class UpdateItemWithResponseTest extends LocalDynamoDbSyncTestBase {
     }
 
     @Test
-    public void returnValues_updatedOld_attributesMapped() {
+    public void updateItemWithResponse_returnUpdatedOld_shouldMapAttributes() {
         Record original = new Record().setId(1).setStringAttr1("attr");
         mappedTable1.putItem(original);
         Record updated = new Record().setId(1).setStringAttr1("attr2");
         UpdateItemEnhancedResponse<Record> response = mappedTable1.updateItemWithResponse(r -> r.item(updated)
                                                                                                 .returnValues(ReturnValue.UPDATED_OLD));
         assertThat(response.attributes().getStringAttr1()).isEqualTo(original.stringAttr1);
+        assertThat(response.attributes().getId()).isNull();
     }
 
     @Test
-    public void returnValues_updatedNew_attributesMapped() {
+    public void updateItemWithResponse_returnUpdatedNew_shouldMapAttributes() {
         Record original = new Record().setId(1).setStringAttr1("attr");
         mappedTable1.putItem(original);
         Record updated = new Record().setId(1).setStringAttr1("attr2");
         UpdateItemEnhancedResponse<Record> response = mappedTable1.updateItemWithResponse(r -> r.item(updated)
                                                                                                 .returnValues(ReturnValue.UPDATED_NEW));
         assertThat(response.attributes().getStringAttr1()).isEqualTo(updated.getStringAttr1());
+        assertThat(response.attributes().getId()).isNull();
     }
 }

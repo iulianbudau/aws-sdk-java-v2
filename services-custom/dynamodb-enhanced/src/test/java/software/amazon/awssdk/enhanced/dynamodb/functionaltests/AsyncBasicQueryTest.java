@@ -217,7 +217,7 @@ public class AsyncBasicQueryTest extends LocalDynamoDbAsyncTestBase {
     }
 
     @Test
-    public void queryAllRecordsDefaultSettings_withProjection() {
+    public void queryAllRecords_withAttributeProjection_shouldExcludeUnprojectedAttributes() {
         insertRecords();
         SdkPublisher<Page<Record>> publisher =
             mappedTable.query(b -> b.queryConditional(keyEqualTo(k -> k.partitionValue("id-value")))
@@ -366,7 +366,7 @@ public class AsyncBasicQueryTest extends LocalDynamoDbAsyncTestBase {
     }
 
     @Test
-    public void queryAllRecordsDefaultSettings_withSelectCount() {
+    public void queryAllRecords_withSelectCount_shouldReturnCountNotItems() {
         insertRecords();
         SdkPublisher<Page<Record>> publisher =
             mappedTable.query(b -> b.queryConditional(keyEqualTo(k -> k.partitionValue("id-value")))
@@ -380,7 +380,7 @@ public class AsyncBasicQueryTest extends LocalDynamoDbAsyncTestBase {
     }
 
     @Test
-    public void queryNestedRecord_withAttributeNameListAndStringAttributeToProjectAppended() {
+    public void queryNestedRecord_withMixedNestedAndTopLevelProjections_shouldProjectMultipleAttributes() {
         insertNestedRecords();
         SdkPublisher<Page<NestedTestRecord>> publisher =
             mappedNestedTable.query(b -> b.queryConditional(keyEqualTo(k -> k.partitionValue("id-value-1")))
@@ -400,7 +400,7 @@ public class AsyncBasicQueryTest extends LocalDynamoDbAsyncTestBase {
     }
 
     @Test
-    public void queryRecordDefaultSettings_withEmptyAttributeList() {
+    public void queryRecords_withEmptyProjectionList_shouldReturnAllAttributes() {
         insertNestedRecords();
         SdkPublisher<Page<NestedTestRecord>> publisher =
             mappedNestedTable.query(b -> b.queryConditional(keyEqualTo(k -> k.partitionValue("id-value-7")))
@@ -414,13 +414,18 @@ public class AsyncBasicQueryTest extends LocalDynamoDbAsyncTestBase {
     }
 
     @Test
-    public void queryAllRecordsDefaultSettings_withNestedProjectionNameEmptyNameMap() {
+    public void queryRecords_withEmptyProjectionString_shouldThrowAssertionError() {
         insertNestedRecords();
         assertThatExceptionOfType(AssertionError.class).isThrownBy(
             () -> drainPublisher(
                 mappedNestedTable.query(b -> b.queryConditional(keyEqualTo(k -> k.partitionValue("id-value-3")))
                                             .attributesToProject("")),
                 1));
+    }
+
+    @Test
+    public void queryRecords_withEmptyNestedProjectionName_shouldThrowAssertionError() {
+        insertNestedRecords();
         assertThatExceptionOfType(AssertionError.class).isThrownBy(
             () -> drainPublisher(
                 mappedNestedTable.query(b -> b.queryConditional(keyEqualTo(k -> k.partitionValue("id-value-3")))

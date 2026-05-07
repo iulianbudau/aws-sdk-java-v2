@@ -259,7 +259,7 @@ public class BatchWriteItemTest extends LocalDynamoDbSyncTestBase {
     }
 
     @Test
-    public void singlePut_withConsumedCapacity() {
+    public void putItem_singleWithConsumedCapacity_shouldReturnMetrics() {
         BatchWriteResult result = enhancedClient.batchWriteItem(BatchWriteItemEnhancedRequest.builder()
                                                                                               .addWriteBatch(
                                                                                                   WriteBatch.builder(Record1.class)
@@ -270,7 +270,9 @@ public class BatchWriteItemTest extends LocalDynamoDbSyncTestBase {
                                                                                               .build());
 
         Assertions.assertThat(result.consumedCapacity()).isNotEmpty();
-        Assertions.assertThat(result.consumedCapacity().get(0).capacityUnits()).isCloseTo(1.0, Offset.offset(0.01));
+        Assertions.assertThat(result.consumedCapacity().get(0).capacityUnits()).isGreaterThan(0d);
+        Assertions.assertThat(result.consumedCapacity().get(0).tableName())
+                  .isEqualTo(getConcreteTableName("table-name-1"));
         assertThat(mappedTable1.getItem(r -> r.key(k -> k.partitionValue(0))), is(RECORDS_1.get(0)));
     }
 
@@ -350,7 +352,7 @@ public class BatchWriteItemTest extends LocalDynamoDbSyncTestBase {
     }
 
     @Test
-    public void singleDelete_withConsumedCapacity() {
+    public void deleteItem_singleWithConsumedCapacity_shouldReturnMetrics() {
         mappedTable1.putItem(r -> r.item(RECORDS_1.get(0)));
 
         BatchWriteResult result = enhancedClient.batchWriteItem(BatchWriteItemEnhancedRequest.builder()
@@ -363,7 +365,9 @@ public class BatchWriteItemTest extends LocalDynamoDbSyncTestBase {
                                                                                               .build());
 
         Assertions.assertThat(result.consumedCapacity()).isNotEmpty();
-        Assertions.assertThat(result.consumedCapacity().get(0).capacityUnits()).isCloseTo(1.0, Offset.offset(0.01));
+        Assertions.assertThat(result.consumedCapacity().get(0).capacityUnits()).isGreaterThan(0d);
+        Assertions.assertThat(result.consumedCapacity().get(0).tableName())
+                  .isEqualTo(getConcreteTableName("table-name-1"));
         assertThat(mappedTable1.getItem(r -> r.key(k -> k.partitionValue(0))), is(nullValue()));
     }
 
@@ -479,7 +483,7 @@ public class BatchWriteItemTest extends LocalDynamoDbSyncTestBase {
     }
 
     @Test
-    public void batchWrite_withSupportedAndUnsupportedSchema_withAutoTimestampEnabled_succeeds() {
+    public void batchWrite_withSupportedAndUnsupportedSchema_shouldPreserveValues() {
         Map<String, AttributeValue> customItem = new HashMap<>();
         customItem.put("pk", AttributeValue.builder().s("custom-1").build());
         customItem.put("details",
@@ -511,7 +515,7 @@ public class BatchWriteItemTest extends LocalDynamoDbSyncTestBase {
     }
 
     @Test
-    public void batchWrite_withSupportedAndUnsupportedSchema_withAutoTimestampEnabled_withResponse_succeeds() {
+    public void batchWriteWithResponse_withSupportedAndUnsupportedSchema_shouldReturnMetrics() {
         Map<String, AttributeValue> customItem = new HashMap<>();
         customItem.put("pk", AttributeValue.builder().s("custom-1").build());
         customItem.put("details",

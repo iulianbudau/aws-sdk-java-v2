@@ -208,7 +208,7 @@ public class FlattenTest extends LocalDynamoDbSyncTestBase {
     }
 
     @Test
-    public void putUpdateScanBatchGet_preservesFlattenedAttributes() {
+    public void flattenedAttributes_acrossMultipleOperations_shouldPreserveValues() {
         Record initial = new Record().setId("id-cross")
                                      .setDocument(new Document().setDocumentAttribute1("a1").setDocumentAttribute2("a2"));
         mappedTable.putItem(initial);

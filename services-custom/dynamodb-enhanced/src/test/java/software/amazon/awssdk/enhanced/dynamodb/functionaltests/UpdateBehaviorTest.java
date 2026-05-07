@@ -167,7 +167,7 @@ public class UpdateBehaviorTest extends LocalDynamoDbSyncTestBase {
     }
 
     @Test
-    public void updateBehaviors_withConditionExpression_preservesWriteIfNotExistsField() {
+    public void updateItem_withConditionExpression_shouldPreserveWriteIfNotExistsField() {
         RecordWithUpdateBehaviors seed = new RecordWithUpdateBehaviors();
         seed.setId("id-cond");
         seed.setCreatedOn(INSTANT_1);
@@ -617,10 +617,8 @@ public class UpdateBehaviorTest extends LocalDynamoDbSyncTestBase {
     }
 
     @Test
-    public void updateItem_withUnsupportedCustomSchema_scalarOnlyMode_doesNotThrow() {
-        DynamoDbTable<Map<String, AttributeValue>> customTable =
-            enhancedClient.table(getConcreteTableName("custom-mode-table"), new UnsupportedConverterTableSchema());
-        customTable.createTable(r -> r.provisionedThroughput(getDefaultProvisionedThroughput()));
+    public void updateItem_withUnsupportedSchema_scalarOnlyMode_shouldSucceed() {
+        DynamoDbTable<Map<String, AttributeValue>> customTable = createCustomModeTable();
 
         Map<String, AttributeValue> item = new java.util.HashMap<>();
         item.put("pk", AttributeValue.builder().s("custom-scalar").build());
@@ -628,43 +626,40 @@ public class UpdateBehaviorTest extends LocalDynamoDbSyncTestBase {
         customTable.updateItem(r -> r.item(item).ignoreNullsMode(IgnoreNullsMode.SCALAR_ONLY));
 
         Map<String, AttributeValue> persisted = customTable.getItem(r -> r.key(k -> k.partitionValue("custom-scalar")));
+        assertThat(persisted).isNotNull();
         assertThat(persisted.get("simple").s()).isEqualTo("value");
-        getDynamoDbClient().deleteTable(r -> r.tableName(getConcreteTableName("custom-mode-table")));
+        deleteCustomModeTable();
     }
 
     @Test
-    public void updateItem_withUnsupportedCustomSchema_mapsOnlyMode_doesNotThrow() {
-        DynamoDbTable<Map<String, AttributeValue>> customTable =
-            enhancedClient.table(getConcreteTableName("custom-mode-table"), new UnsupportedConverterTableSchema());
-        customTable.createTable(r -> r.provisionedThroughput(getDefaultProvisionedThroughput()));
+    public void updateItem_withUnsupportedSchema_mapsOnlyMode_shouldSucceed() {
+        DynamoDbTable<Map<String, AttributeValue>> customTable = createCustomModeTable();
 
         Map<String, AttributeValue> item = buildCustomSchemaItem("custom-maps");
         customTable.updateItem(r -> r.item(item).ignoreNullsMode(IgnoreNullsMode.MAPS_ONLY));
 
         Map<String, AttributeValue> persisted = customTable.getItem(r -> r.key(k -> k.partitionValue("custom-maps")));
+        assertThat(persisted).isNotNull();
         assertThat(persisted.get("nested").m().get("city").s()).isEqualTo("Seattle");
-        getDynamoDbClient().deleteTable(r -> r.tableName(getConcreteTableName("custom-mode-table")));
+        deleteCustomModeTable();
     }
 
     @Test
-    public void updateItem_withUnsupportedCustomSchema_defaultMode_doesNotThrow() {
-        DynamoDbTable<Map<String, AttributeValue>> customTable =
-            enhancedClient.table(getConcreteTableName("custom-mode-table"), new UnsupportedConverterTableSchema());
-        customTable.createTable(r -> r.provisionedThroughput(getDefaultProvisionedThroughput()));
+    public void updateItem_withUnsupportedSchema_defaultMode_shouldSucceed() {
+        DynamoDbTable<Map<String, AttributeValue>> customTable = createCustomModeTable();
 
         Map<String, AttributeValue> item = buildCustomSchemaItem("custom-default");
         customTable.updateItem(item);
 
         Map<String, AttributeValue> persisted = customTable.getItem(r -> r.key(k -> k.partitionValue("custom-default")));
+        assertThat(persisted).isNotNull();
         assertThat(persisted.get("nested").m().get("country").s()).isEqualTo("US");
-        getDynamoDbClient().deleteTable(r -> r.tableName(getConcreteTableName("custom-mode-table")));
+        deleteCustomModeTable();
     }
 
     @Test
-    public void sharedClient_withSupportedAndUnsupportedSchemas_appliesAndSkipsAsExpected() {
-        DynamoDbTable<Map<String, AttributeValue>> customTable =
-            enhancedClient.table(getConcreteTableName("custom-mode-table"), new UnsupportedConverterTableSchema());
-        customTable.createTable(r -> r.provisionedThroughput(getDefaultProvisionedThroughput()));
+    public void sharedClient_withMixedSchemas_shouldApplySupportedAndSkipUnsupported() {
+        DynamoDbTable<Map<String, AttributeValue>> customTable = createCustomModeTable();
 
         RecordWithUpdateBehaviors supportedRecord = new RecordWithUpdateBehaviors();
         supportedRecord.setId("supported-id");
@@ -676,8 +671,23 @@ public class UpdateBehaviorTest extends LocalDynamoDbSyncTestBase {
         RecordWithUpdateBehaviors supportedPersisted = mappedTable.getItem(r -> r.key(k -> k.partitionValue("supported-id")));
         Map<String, AttributeValue> customPersisted = customTable.getItem(r -> r.key(k -> k.partitionValue("custom-mixed")));
 
+        assertThat(supportedPersisted).isNotNull();
         assertThat(supportedPersisted.getLastAutoUpdatedOn()).isNotNull();
+        assertThat(supportedPersisted.getCreatedAutoUpdateOn()).isNotNull();
+        assertThat(customPersisted).isNotNull();
+        assertThat(customPersisted.get("nested").m().get("city").s()).isEqualTo("Seattle");
         assertThat(customPersisted.get("records").l().get(1).s()).isEqualTo("literal");
+        deleteCustomModeTable();
+    }
+
+    private DynamoDbTable<Map<String, AttributeValue>> createCustomModeTable() {
+        DynamoDbTable<Map<String, AttributeValue>> customTable =
+            enhancedClient.table(getConcreteTableName("custom-mode-table"), new UnsupportedConverterTableSchema());
+        customTable.createTable(r -> r.provisionedThroughput(getDefaultProvisionedThroughput()));
+        return customTable;
+    }
+
+    private void deleteCustomModeTable() {
         getDynamoDbClient().deleteTable(r -> r.tableName(getConcreteTableName("custom-mode-table")));
     }
 

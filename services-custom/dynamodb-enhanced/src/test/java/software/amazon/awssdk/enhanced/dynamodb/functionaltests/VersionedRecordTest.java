@@ -728,7 +728,7 @@ public class VersionedRecordTest extends LocalDynamoDbSyncTestBase {
     }
 
     @Test
-    public void transactWrite_updateItem_onVersionedRecord_incrementsVersion() {
+    public void transactWriteUpdate_versionedRecord_shouldIncrementVersion() {
         mappedTable.putItem(r -> r.item(new Record().setId("tx-id").setAttribute("one")));
         Record existing = mappedTable.getItem(r -> r.key(k -> k.partitionValue("tx-id")));
 

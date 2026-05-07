@@ -30,7 +30,7 @@ public class AsyncAtomicCounterTest extends LocalDynamoDbAsyncTestBase {
     }
 
     @Test
-    public void repeatedUpdate_incrementsCounters() {
+    public void repeatedUpdate_shouldIncrementCountersOnEachUpdate() {
         AtomicCounterRecord record = new AtomicCounterRecord();
         record.setId("id1");
         record.setAttribute1("value");

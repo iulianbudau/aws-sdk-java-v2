@@ -554,7 +554,7 @@ public class TransactWriteItemsTest extends LocalDynamoDbSyncTestBase {
     }
 
     @Test
-    public void transactWriteWithSupportedAndUnsupportedSchema_withAutoTimestampEnabled_succeeds() {
+    public void transactWrite_withSupportedAndUnsupportedSchema_shouldPreserveValues() {
         TimestampedRecord timestampedRecord = new TimestampedRecord().setId("ts-1");
 
         Map<String, AttributeValue> customItem = new HashMap<>();
@@ -577,7 +577,7 @@ public class TransactWriteItemsTest extends LocalDynamoDbSyncTestBase {
     }
 
     @Test
-    public void transactWriteWithSupportedAndUnsupportedSchema_withAutoTimestampEnabled_withResponse_succeeds() {
+    public void transactWriteWithResponse_withSupportedAndUnsupportedSchema_shouldReturnMetrics() {
         TimestampedRecord timestampedRecord = new TimestampedRecord().setId("ts-1");
 
         Map<String, AttributeValue> customItem = new HashMap<>();

@@ -198,7 +198,7 @@ public class FlattenWithTagsTest extends LocalDynamoDbSyncTestBase {
     }
 
     @Test
-    public void putUpdateScanBatchGet_preservesSortTaggedFlattenedPath() {
+    public void sortTaggedFlattenedPath_acrossMultipleOperations_shouldPreserveValues() {
         Record initial = new Record().setId("id-tag")
                                      .setDocument(new Document().setDocumentAttribute1("s1").setDocumentAttribute2("v2"));
         mappedTable.putItem(initial);

@@ -34,7 +34,7 @@ public class AsyncUpdateExpressionTest extends LocalDynamoDbAsyncTestBase {
     }
 
     @Test
-    public void updateWithConditionExpression_appliesWhenExpressionMatches() {
+    public void updateItem_withConditionExpression_shouldNotApplyUpdateWhenConditionMatches() {
         RecordForUpdateExpressions seed = new RecordForUpdateExpressions();
         seed.setId("id1");
         seed.setStringAttribute("init");

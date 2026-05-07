@@ -193,7 +193,7 @@ public class AsyncTransactGetItemsTest extends LocalDynamoDbAsyncTestBase {
     }
 
     @Test
-    public void getRecordsFromMultipleTables_withExtensionEnabled_doesNotThrowAndMatches() {
+    public void transactGetRecords_withExtension_shouldPreserveAndReturnCorrectData() {
         insertRecords();
 
         DynamoDbEnhancedAsyncClient extensionClient = DefaultDynamoDbEnhancedAsyncClient.builder()

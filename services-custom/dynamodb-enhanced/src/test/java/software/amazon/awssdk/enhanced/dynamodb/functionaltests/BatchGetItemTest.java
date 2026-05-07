@@ -342,7 +342,7 @@ public class BatchGetItemTest extends LocalDynamoDbSyncTestBase {
     }
 
     @Test
-    public void getRecordsFromMultipleTables_withExtensionEnabled_doesNotThrowAndMatches() {
+    public void batchGetRecords_withExtension_shouldPreserveAndReturnCorrectData() {
         insertRecords();
 
         DynamoDbEnhancedClient extensionClient = DynamoDbEnhancedClient.builder()
@@ -386,7 +386,7 @@ public class BatchGetItemTest extends LocalDynamoDbSyncTestBase {
     }
 
     @Test
-    public void getRecordsFromMixedSchemaTables_inSingleRequest_matchesExpected() {
+    public void batchGetRecords_fromMixedSchemaTypes_shouldReturnCorrectlyCastItems() {
         insertRecords();
         BeanRecord beanRecord = new BeanRecord();
         beanRecord.setId(10);
