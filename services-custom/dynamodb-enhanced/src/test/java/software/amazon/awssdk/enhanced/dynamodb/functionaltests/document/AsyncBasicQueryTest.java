@@ -41,6 +41,7 @@ import software.amazon.awssdk.enhanced.dynamodb.document.EnhancedDocument;
 import software.amazon.awssdk.enhanced.dynamodb.functionaltests.LocalDynamoDbAsyncTestBase;
 import software.amazon.awssdk.enhanced.dynamodb.model.Page;
 import software.amazon.awssdk.enhanced.dynamodb.model.QueryEnhancedRequest;
+import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.DeleteTableRequest;
 import software.amazon.awssdk.services.dynamodb.model.Select;
 
@@ -135,7 +136,7 @@ public class AsyncBasicQueryTest extends LocalDynamoDbAsyncTestBase {
     @Test
     public void queryExclusiveStartKey() {
         insertDocuments();
-        java.util.Map<String, software.amazon.awssdk.services.dynamodb.model.AttributeValue> exclusiveStartKey =
+        java.util.Map<String, AttributeValue> exclusiveStartKey =
             new java.util.HashMap<>();
         exclusiveStartKey.put("id", stringValue("id-value"));
         exclusiveStartKey.put("sort", numberValue(7));

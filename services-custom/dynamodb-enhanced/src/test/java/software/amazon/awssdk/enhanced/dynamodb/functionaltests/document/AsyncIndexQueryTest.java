@@ -47,6 +47,7 @@ import software.amazon.awssdk.enhanced.dynamodb.model.EnhancedGlobalSecondaryInd
 import software.amazon.awssdk.enhanced.dynamodb.model.Page;
 import software.amazon.awssdk.enhanced.dynamodb.model.QueryConditional;
 import software.amazon.awssdk.enhanced.dynamodb.model.QueryEnhancedRequest;
+import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.DeleteTableRequest;
 import software.amazon.awssdk.services.dynamodb.model.ProjectionType;
 
@@ -131,7 +132,7 @@ public class AsyncIndexQueryTest extends LocalDynamoDbAsyncTestBase {
     @Test
     public void queryExclusiveStartKey() {
         insertDocuments();
-        Map<String, software.amazon.awssdk.services.dynamodb.model.AttributeValue> startKey = new HashMap<>();
+        Map<String, AttributeValue> startKey = new HashMap<>();
         startKey.put("id", stringValue("id-value"));
         startKey.put("sort", numberValue(7));
         startKey.put("gsi_id", stringValue("gsi-id-value"));

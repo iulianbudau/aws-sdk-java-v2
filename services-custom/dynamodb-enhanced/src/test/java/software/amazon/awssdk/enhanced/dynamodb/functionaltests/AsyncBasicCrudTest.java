@@ -26,6 +26,7 @@ import static software.amazon.awssdk.enhanced.dynamodb.mapper.StaticAttributeTag
 import static software.amazon.awssdk.enhanced.dynamodb.mapper.StaticAttributeTags.secondaryPartitionKey;
 import static software.amazon.awssdk.enhanced.dynamodb.mapper.StaticAttributeTags.secondarySortKey;
 
+import java.util.Collections;
 import java.util.Objects;
 import java.util.HashMap;
 import java.util.Map;
@@ -698,7 +699,7 @@ public class AsyncBasicCrudTest extends LocalDynamoDbAsyncTestBase {
         item.put("pk", AttributeValue.builder().s("custom-1").build());
         item.put("nested",
                  AttributeValue.builder()
-                               .m(java.util.Collections.singletonMap("k", AttributeValue.builder().s("v").build()))
+                               .m(Collections.singletonMap("k", AttributeValue.builder().s("v").build()))
                                .build());
 
         customTable.putItem(item).join();

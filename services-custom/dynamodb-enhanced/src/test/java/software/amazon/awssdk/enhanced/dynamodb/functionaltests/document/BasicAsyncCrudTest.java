@@ -23,6 +23,7 @@ import static org.hamcrest.Matchers.nullValue;
 import static software.amazon.awssdk.enhanced.dynamodb.AttributeConverterProvider.defaultProvider;
 import static software.amazon.awssdk.enhanced.dynamodb.internal.AttributeValues.stringValue;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.CompletionException;
@@ -627,7 +628,7 @@ public class BasicAsyncCrudTest extends LocalDynamoDbAsyncTestBase {
         extensionTable.updateItem(document).join();
 
         EnhancedDocument persisted = extensionTable.getItem(r -> r.key(k -> k.partitionValue("doc-1"))).join();
-        assertThat(persisted, is(org.hamcrest.Matchers.notNullValue()));
+        assertThat(persisted, is(notNullValue()));
         getDynamoDbAsyncClient().deleteTable(r -> r.tableName(extensionTableName)).join();
     }
 
@@ -654,7 +655,7 @@ public class BasicAsyncCrudTest extends LocalDynamoDbAsyncTestBase {
         itemMap.put("id", AttributeValue.fromS("doc-1"));
         itemMap.put("time", AttributeValue.fromS("root-original"));
         itemMap.put("payload", AttributeValue.fromM(nested));
-        itemMap.put("records", AttributeValue.fromL(java.util.Collections.singletonList(AttributeValue.fromM(nested))));
+        itemMap.put("records", AttributeValue.fromL(Collections.singletonList(AttributeValue.fromM(nested))));
 
         EnhancedDocument document = EnhancedDocument.fromAttributeValueMap(itemMap).toBuilder()
                                                     .attributeConverterProviders(defaultProvider())
