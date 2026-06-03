@@ -18,9 +18,12 @@ package software.amazon.awssdk.core.internal.http.pipeline.stages.utils;
 import java.time.Duration;
 import software.amazon.awssdk.annotations.SdkInternalApi;
 import software.amazon.awssdk.core.client.config.HedgingConfig;
+import software.amazon.awssdk.utils.Logger;
 
 @SdkInternalApi
 public final class HedgingDelayResolver {
+    private static final Logger log = Logger.loggerFor(HedgingDelayResolver.class);
+
     private HedgingDelayResolver() {
     }
 
@@ -28,9 +31,26 @@ public final class HedgingDelayResolver {
                                             String operationName,
                                             HedgingLatencyTracker tracker) {
         HedgingConfig.DelayConfig delayConfig = policy.delayConfig();
+        String delayConfigType = delayConfig == null ? "null" : delayConfig.getClass().getSimpleName();
+        log.debug(() -> String.format(
+            "[HEDGE-ADAPTIVE] reason=ADAPTIVE_RESOLVE_BASE_DELAY operationName=%s delayConfigType=%s",
+            operationName,
+            delayConfigType));
         if (delayConfig instanceof HedgingConfig.AdaptiveDelayConfig) {
             HedgingConfig.AdaptiveDelayConfig adaptiveConfig = (HedgingConfig.AdaptiveDelayConfig) delayConfig;
-            return tracker == null ? adaptiveConfig.fallbackDelay() : tracker.adaptiveDelay(operationName, adaptiveConfig);
+            if (tracker == null) {
+                log.debug(() -> String.format(
+                    "[HEDGE-ADAPTIVE] reason=ADAPTIVE_FALLBACK_TRACKER_NULL operationName=%s fallbackDelayMs=%d",
+                    operationName,
+                    adaptiveConfig.fallbackDelay().toMillis()));
+                return adaptiveConfig.fallbackDelay();
+            }
+            Duration resolved = tracker.adaptiveDelay(operationName, adaptiveConfig);
+            log.debug(() -> String.format(
+                "[HEDGE-ADAPTIVE] reason=ADAPTIVE_BASE_DELAY_RESOLVED operationName=%s trackerNull=false resolvedBaseDelayMs=%d",
+                operationName,
+                resolved.toMillis()));
+            return resolved;
         }
         if (delayConfig instanceof HedgingConfig.FixedDelayConfig) {
             return ((HedgingConfig.FixedDelayConfig) delayConfig).baseDelay();

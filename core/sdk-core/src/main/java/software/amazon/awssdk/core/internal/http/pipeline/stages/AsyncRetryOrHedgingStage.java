@@ -74,11 +74,10 @@ public final class AsyncRetryOrHedgingStage<OutputT> implements RequestPipeline<
             Optional.ofNullable(dependencies.clientConfiguration().option(SdkClientOption.HEDGING_CONFIG)),
             () -> Optional.empty());
         String operationName = context.executionAttributes().getAttribute(SdkExecutionAttribute.OPERATION_NAME);
+        HedgingConfig.OperationHedgingPolicy policy = resolved.policyForOperation(operationName);
 
         boolean shouldHedge = resolved.shouldHedge(operationName);
-        int maxAttempts = resolved.policyForOperation(operationName).maxHedgedAttempts();
-        log.debug(() -> String.format("[HEDGE-ROUTING] operation=%s, enabled=%s, shouldHedge=%s, maxAttempts=%d",
-            operationName, resolved.enabled(), shouldHedge, maxAttempts));
+        log.debug(() -> buildHedgingSummary(resolved, shouldHedge, operationName, policy));
         
         if (!shouldHedge) {
             log.debug(() -> "[HEDGE-ROUTING] Using RETRY path");
@@ -86,5 +85,43 @@ public final class AsyncRetryOrHedgingStage<OutputT> implements RequestPipeline<
         }
         log.debug(() -> "[HEDGE-ROUTING] Using HEDGING path");
         return hedgingStage.execute(request, context);
+    }
+
+    private static String buildHedgingSummary(HedgingConfig resolved,
+                                              boolean shouldHedge,
+                                              String operationName,
+                                              HedgingConfig.OperationHedgingPolicy policy) {
+        HedgingConfig.DelayConfig delayConfig = policy.delayConfig();
+        String delayConfigType = delayConfig == null ? "null" : delayConfig.getClass().getSimpleName();
+        String percentile = "n/a";
+        String sampleSize = "n/a";
+        String minSamplesRequired = "n/a";
+        String minDelay = "n/a";
+        String maxDelay = "n/a";
+        String fallbackDelay = "n/a";
+        if (delayConfig instanceof HedgingConfig.AdaptiveDelayConfig) {
+            HedgingConfig.AdaptiveDelayConfig adaptive = (HedgingConfig.AdaptiveDelayConfig) delayConfig;
+            percentile = String.format("%.3f", adaptive.percentile());
+            sampleSize = Integer.toString(adaptive.sampleSize());
+            minSamplesRequired = Integer.toString(adaptive.minSamplesRequired());
+            minDelay = adaptive.minDelay() == null ? "null" : adaptive.minDelay().toMillis() + "ms";
+            maxDelay = adaptive.maxDelay() == null ? "null" : adaptive.maxDelay().toMillis() + "ms";
+            fallbackDelay = adaptive.fallbackDelay().toMillis() + "ms";
+        }
+        return String.format(
+            "[HEDGE-ADAPTIVE] reason=HEDGING_CONFIG_SUMMARY_ASYNC enabled=%s shouldHedge=%s operationName=%s "
+            + "delayConfigType=%s percentile=%s sampleSize=%s minSamplesRequired=%s minDelay=%s maxDelay=%s "
+            + "fallbackDelay=%s maxHedgedAttempts=%d",
+            resolved.enabled(),
+            shouldHedge,
+            operationName,
+            delayConfigType,
+            percentile,
+            sampleSize,
+            minSamplesRequired,
+            minDelay,
+            maxDelay,
+            fallbackDelay,
+            policy.maxHedgedAttempts());
     }
 }

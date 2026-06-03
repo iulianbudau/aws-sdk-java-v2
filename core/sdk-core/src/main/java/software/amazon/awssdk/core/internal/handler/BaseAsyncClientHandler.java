@@ -38,6 +38,7 @@ import software.amazon.awssdk.core.interceptor.ExecutionAttributes;
 import software.amazon.awssdk.core.interceptor.InterceptorContext;
 import software.amazon.awssdk.core.internal.InternalCoreExecutionAttribute;
 import software.amazon.awssdk.core.internal.http.AmazonAsyncHttpClient;
+import software.amazon.awssdk.core.internal.http.HttpClientDependencies;
 import software.amazon.awssdk.core.internal.http.IdempotentAsyncResponseHandler;
 import software.amazon.awssdk.core.internal.http.TransformingAsyncResponseHandler;
 import software.amazon.awssdk.core.internal.http.async.AsyncAfterTransmissionInterceptorCallingResponseHandler;
@@ -301,12 +302,16 @@ public abstract class BaseAsyncClientHandler extends BaseClientHandler implement
         TransformingAsyncResponseHandler<Response<OutputT>> responseHandler,
         Supplier<TransformingAsyncResponseHandler<Response<OutputT>>> responseHandlerFactory) {
 
-        AmazonAsyncHttpClient.RequestExecutionBuilder builder = client.requestExecutionBuilder()
+        AmazonAsyncHttpClient.RequestExecutionBuilder requestBuilder = client.requestExecutionBuilder()
                      .requestProvider(requestProvider)
                      .request(request)
                      .originalRequest(originalRequest)
-                     .executionContext(executionContext)
-                     .httpClientDependencies(c -> c.clientConfiguration(clientConfiguration));
+                     .executionContext(executionContext);
+        HttpClientDependencies httpClientDependencies = requestBuilder.httpClientDependencies();
+        SdkClientConfiguration mergedClientConfiguration =
+            mergeRequestClientConfiguration(clientConfiguration, httpClientDependencies.clientConfiguration());
+        AmazonAsyncHttpClient.RequestExecutionBuilder builder = requestBuilder.httpClientDependencies(
+            httpClientDependencies.toBuilder().clientConfiguration(mergedClientConfiguration).build());
 
         if (responseHandlerFactory != null) {
             return builder.execute(responseHandler, responseHandlerFactory);

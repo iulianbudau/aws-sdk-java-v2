@@ -26,6 +26,7 @@ import software.amazon.awssdk.core.internal.http.RequestExecutionContext;
 import software.amazon.awssdk.core.internal.http.pipeline.RequestPipeline;
 import software.amazon.awssdk.core.internal.http.pipeline.RequestToResponsePipeline;
 import software.amazon.awssdk.http.SdkHttpFullRequest;
+import software.amazon.awssdk.utils.Logger;
 
 /**
  * Sync orchestration stage that branches on resolved {@link HedgingConfig}: when hedging is enabled
@@ -37,6 +38,7 @@ import software.amazon.awssdk.http.SdkHttpFullRequest;
  */
 @SdkInternalApi
 public final class RetryOrHedgingStage<OutputT> implements RequestToResponsePipeline<OutputT> {
+    private static final Logger log = Logger.loggerFor(RetryOrHedgingStage.class);
 
     private final HttpClientDependencies dependencies;
     private final RetryableStage<OutputT> retryableStage;
@@ -56,10 +58,51 @@ public final class RetryOrHedgingStage<OutputT> implements RequestToResponsePipe
             Optional.ofNullable(dependencies.clientConfiguration().option(SdkClientOption.HEDGING_CONFIG)),
             () -> Optional.empty());
         String operationName = context.executionAttributes().getAttribute(SdkExecutionAttribute.OPERATION_NAME);
+        HedgingConfig.OperationHedgingPolicy policy = resolved.policyForOperation(operationName);
+        boolean shouldHedge = resolved.shouldHedge(operationName);
+        log.debug(() -> buildHedgingSummary(resolved, shouldHedge, operationName, policy));
 
-        if (!resolved.shouldHedge(operationName)) {
+        if (!shouldHedge) {
             return retryableStage.execute(request, context);
         }
         return hedgingStage.execute(request, context);
+    }
+
+    private static String buildHedgingSummary(HedgingConfig resolved,
+                                              boolean shouldHedge,
+                                              String operationName,
+                                              HedgingConfig.OperationHedgingPolicy policy) {
+        HedgingConfig.DelayConfig delayConfig = policy.delayConfig();
+        String delayConfigType = delayConfig == null ? "null" : delayConfig.getClass().getSimpleName();
+        String percentile = "n/a";
+        String sampleSize = "n/a";
+        String minSamplesRequired = "n/a";
+        String minDelay = "n/a";
+        String maxDelay = "n/a";
+        String fallbackDelay = "n/a";
+        if (delayConfig instanceof HedgingConfig.AdaptiveDelayConfig) {
+            HedgingConfig.AdaptiveDelayConfig adaptive = (HedgingConfig.AdaptiveDelayConfig) delayConfig;
+            percentile = String.format("%.3f", adaptive.percentile());
+            sampleSize = Integer.toString(adaptive.sampleSize());
+            minSamplesRequired = Integer.toString(adaptive.minSamplesRequired());
+            minDelay = adaptive.minDelay() == null ? "null" : adaptive.minDelay().toMillis() + "ms";
+            maxDelay = adaptive.maxDelay() == null ? "null" : adaptive.maxDelay().toMillis() + "ms";
+            fallbackDelay = adaptive.fallbackDelay().toMillis() + "ms";
+        }
+        return String.format(
+            "[HEDGE-ADAPTIVE] reason=HEDGING_CONFIG_SUMMARY_SYNC enabled=%s shouldHedge=%s operationName=%s "
+            + "delayConfigType=%s percentile=%s sampleSize=%s minSamplesRequired=%s minDelay=%s maxDelay=%s "
+            + "fallbackDelay=%s maxHedgedAttempts=%d",
+            resolved.enabled(),
+            shouldHedge,
+            operationName,
+            delayConfigType,
+            percentile,
+            sampleSize,
+            minSamplesRequired,
+            minDelay,
+            maxDelay,
+            fallbackDelay,
+            policy.maxHedgedAttempts());
     }
 }

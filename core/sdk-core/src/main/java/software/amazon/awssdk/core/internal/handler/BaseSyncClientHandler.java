@@ -33,6 +33,7 @@ import software.amazon.awssdk.core.interceptor.ExecutionAttributes;
 import software.amazon.awssdk.core.interceptor.InterceptorContext;
 import software.amazon.awssdk.core.internal.http.AmazonSyncHttpClient;
 import software.amazon.awssdk.core.internal.http.CombinedResponseHandler;
+import software.amazon.awssdk.core.internal.http.HttpClientDependencies;
 import software.amazon.awssdk.core.internal.http.InterruptMonitor;
 import software.amazon.awssdk.core.metrics.CoreMetric;
 import software.amazon.awssdk.core.sync.RequestBody;
@@ -95,11 +96,15 @@ public abstract class BaseSyncClientHandler extends BaseClientHandler implements
                                      SdkRequest originalRequest,
                                      ExecutionContext executionContext,
                                      HttpResponseHandler<Response<OutputT>> responseHandler) {
-        return client.requestExecutionBuilder()
+        AmazonSyncHttpClient.RequestExecutionBuilder requestBuilder = client.requestExecutionBuilder()
                      .request(request)
                      .originalRequest(originalRequest)
-                     .executionContext(executionContext)
-                     .httpClientDependencies(c -> c.clientConfiguration(clientConfiguration))
+                     .executionContext(executionContext);
+        HttpClientDependencies httpClientDependencies = requestBuilder.httpClientDependencies();
+        SdkClientConfiguration mergedClientConfiguration =
+            mergeRequestClientConfiguration(clientConfiguration, httpClientDependencies.clientConfiguration());
+        return requestBuilder.httpClientDependencies(
+            httpClientDependencies.toBuilder().clientConfiguration(mergedClientConfiguration).build())
                      .execute(responseHandler);
     }
 

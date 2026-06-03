@@ -37,6 +37,7 @@ import software.amazon.awssdk.core.interceptor.InterceptorContext;
 import software.amazon.awssdk.core.interceptor.SdkExecutionAttribute;
 import software.amazon.awssdk.core.interceptor.SdkInternalExecutionAttribute;
 import software.amazon.awssdk.core.internal.InternalCoreExecutionAttribute;
+import software.amazon.awssdk.core.internal.http.pipeline.stages.utils.HedgingLatencyTracker;
 import software.amazon.awssdk.core.internal.util.MetricUtils;
 import software.amazon.awssdk.core.metrics.CoreMetric;
 import software.amazon.awssdk.core.signer.Signer;
@@ -254,6 +255,25 @@ public abstract class BaseClientHandler {
             return config;
         }
         return clientConfiguration;
+    }
+
+    /**
+     * Merges per-request configuration into the HTTP client's runtime configuration. Preserves client-scoped runtime
+     * state such as {@link SdkClientOption#HEDGING_LATENCY_TRACKER} that is initialized by
+     * {@link software.amazon.awssdk.core.internal.http.AmazonAsyncHttpClient} /
+     * {@link software.amazon.awssdk.core.internal.http.AmazonSyncHttpClient} but is not present on the handler's
+     * {@link SdkClientConfiguration}.
+     */
+    static SdkClientConfiguration mergeRequestClientConfiguration(SdkClientConfiguration requestConfiguration,
+                                                                SdkClientConfiguration httpClientConfiguration) {
+        HedgingLatencyTracker tracker = httpClientConfiguration.option(SdkClientOption.HEDGING_LATENCY_TRACKER);
+        SdkClientConfiguration.Builder merged = requestConfiguration.toBuilder();
+        if (tracker != null) {
+            merged.option(SdkClientOption.HEDGING_LATENCY_TRACKER, tracker);
+        } else {
+            merged.lazyOptionIfAbsent(SdkClientOption.HEDGING_LATENCY_TRACKER, c -> new HedgingLatencyTracker());
+        }
+        return merged.build();
     }
 
     /**

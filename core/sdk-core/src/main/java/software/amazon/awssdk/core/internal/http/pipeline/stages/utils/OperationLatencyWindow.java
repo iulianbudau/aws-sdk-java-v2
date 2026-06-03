@@ -52,5 +52,9 @@ public final class OperationLatencyWindow {
         }
         return Arrays.copyOf(latenciesNanos, currentSize);
     }
+
+    public int currentSize() {
+        return size.get();
+    }
 }
 
